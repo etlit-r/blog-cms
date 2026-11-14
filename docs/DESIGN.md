@@ -28,7 +28,7 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
                    │   ├─ /media/*   ─────────────────────────────────▶  R2 (画像)       │
                    │   ├─ /api/admin/* (JSON API, 要ログイン) ─────────▶  D1 (SQLite)     │
                    │   └─ Cache API (公開ページ・画像のエッジキャッシュ)                   │
-  管理者(スマホ) ──▶│  Static Assets  /admin/*  (管理画面 SPA: Preact + Vite でビルド)     │
+  管理者(スマホ) ──▶│  Static Assets  /admin/*  (管理画面 SPA: React + Vite でビルド)       │
                    └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -48,7 +48,7 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 | 画像ストレージ | Cloudflare R2 | 無料 10GB、転送量は無料 |
 | テンプレートエンジン | Mustache 互換（`mustache.js`） | ロジックを持たない構文で、CMS で編集しても壊れにくい。依存が軽く、ユーザーが書いたテンプレートで任意コードが動かない |
 | HTML 加工 | `HTMLRewriter`（Workers 組み込み） | 本文の画像抽出や `loading="lazy"` / `srcset` の付与をストリーミングで行い、CPU 消費が少ない |
-| 管理画面 | Preact + Vite + TypeScript | 小さい。ビルド成果物を Static Assets に置く |
+| 管理画面 | React + Vite + TypeScript（ルーティングは React Router） | Tiptap 公式の `@tiptap/react` がそのまま使え、情報も多い。エディタは画面単位で遅延読み込みし、初回表示を軽くする。ビルド成果物は Static Assets に置く |
 | リッチテキストエディタ | Tiptap (ProseMirror) | モバイルの contenteditable での挙動が比較的安定しており、拡張しやすい |
 | コードエディタ | CodeMirror 6 | HTML / CSS のシンタックスハイライト。モバイルでも動く |
 | 言語 | TypeScript（Worker・管理画面とも） | 型を共有できる |
@@ -458,7 +458,7 @@ blog-cms/
 │   │   ├─ storage.ts        # 画像ストレージ抽象 (R2 / D1 BLOB)
 │   │   └─ tags.ts           # 正規化
 │   └─ defaults/             # 初期テンプレートと CSS（*.mustache, site.css）
-├─ admin/                    # 管理画面 SPA (Preact + Vite)
+├─ admin/                    # 管理画面 SPA (React + Vite)
 │   ├─ src/
 │   │   ├─ pages/            # Login, Setup, Posts, PostEdit, Media, Tags, Design, Pages, Settings
 │   │   ├─ components/       # RichEditor(Tiptap), CodeEditor(CodeMirror), TagInput, ImagePicker, BottomNav
