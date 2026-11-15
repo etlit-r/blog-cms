@@ -22,18 +22,22 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 ## 2. 全体構成
 
 ```
-                   ┌──────────────────────────── Cloudflare ─────────────────────────────┐
-  閲覧者(スマホ) ──▶│  Worker (Hono)                                                      │
-                   │   ├─ 公開ルート  /, /posts/:slug, /tags/:tag ... ── SSR(テンプレート) │
-                   │   ├─ /media/*   ─────────────────────────────────▶  R2 (画像)       │
-                   │   ├─ /api/admin/* (JSON API, 要ログイン) ─────────▶  D1 (SQLite)     │
-                   │   └─ Cache API (公開ページ・画像のエッジキャッシュ)                   │
-  管理者(スマホ) ──▶│  Static Assets  /admin/*  (管理画面 SPA: React + Vite でビルド)       │
-                   └──────────────────────────────────────────────────────────────────────┘
+                         ┌───────────────────────────── Cloudflare ─────────────────────────────┐
+ 閲覧者 ─▶ etlits.dev ───▶│  Worker (Hono)  ※ Host ヘッダーで振り分け                            │
+                         │   [公開ホスト etlits.dev]                                             │
+                         │    ├─ /, /posts/:slug, /tags/:tag ... ── SSR(テンプレート) ─▶ D1      │
+                         │    ├─ /media/*  ─────────────────────────────────────────▶ R2        │
+                         │    └─ Cache API (公開ページ・画像のエッジキャッシュ)                     │
+ 管理者 ─▶ admin.         │   [管理ホスト admin.etlits.dev]                                       │
+          etlits.dev ───▶│    ├─ /api/admin/* (JSON API, 要ログイン) ───────────────▶ D1 / R2   │
+                         │    ├─ /media/*  (エディタ内の画像表示用) ─────────────────▶ R2        │
+                         │    └─ それ以外 ─▶ Static Assets の管理画面 SPA (React + Vite)          │
+                         └───────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Worker 1 本**で、公開サイトの描画・管理用 API・画像配信を受け持つ。
-- **管理画面は静的 SPA** にして Workers Static Assets から配信する。静的アセットへのリクエストは無料かつ Worker のリクエスト数に数えられないため、無料枠を消費しない。
+- **Worker 1 本**に `etlits.dev`（公開）と `admin.etlits.dev`（管理）の 2 つの Custom Domain を割り当て、`Host` ヘッダーで処理を振り分ける。公開ホストでは管理 API・管理画面を一切返さず（404）、管理ホストでは公開ページを返さない。
+- 管理画面を別オリジンに分けることで、記事に貼ったスクリプトや埋め込みコードが公開サイトで動いても、管理画面の Cookie や API には触れられない。
+- **管理画面は静的 SPA** にして Workers Static Assets から配信する。ビルド成果物は `public/admin/` に置き、`assets.run_worker_first: ["/admin/*"]` を指定する。これにより公開ホストから `/admin/*` を直接取得できないよう Worker で 404 を返し、管理ホストではパスを書き換えて SPA を返す。管理画面へのアクセスは少ないので、Worker を経由してもリクエスト数への影響は小さい。
 - 公開ページは **サーバーサイドレンダリング（SSR）** する。D1 にあるテンプレートへデータを流し込んで HTML を返す。クライアント JS がなくても表示でき、表示が速く SEO にも向く。
 
 ---
@@ -70,12 +74,15 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 | `/media/:key` | 画像（R2） |
 | `/feed.xml` / `/sitemap.xml` / `/robots.txt` | RSS・サイトマップ |
 
-### 管理側
+### 管理側（`admin.etlits.dev`）
 | パス | 内容 |
 |------|------|
-| `/admin/` | 管理画面 SPA（Static Assets） |
-| `/admin/setup` | 初回アカウント作成（アカウント作成後は無効） |
+| `/` 以下（下記以外すべて） | 管理画面 SPA（React Router が画面を切り替える。Worker が `public/admin/index.html` を返す） |
+| `/setup` | 初回アカウント作成（アカウント作成後は無効） |
 | `/api/admin/*` | JSON API（`/api/admin/auth/*` 以外はログイン必須） |
+| `/media/:key` | 画像（エディタ内で本文の相対パス `/media/...` を表示するため、公開側と同じものを返す） |
+
+公開ホストで `/api/admin/*` や `/admin/*` にアクセスされた場合は 404 を返す。
 
 ---
 
@@ -94,8 +101,8 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 ### 5.2 ログインとセッション
 - パスワードは **PBKDF2-SHA256（WebCrypto）**、16 バイトのソルトでハッシュ化する。workerd の上限である 100,000 回で反復する。ログインはまれなので、無料枠の CPU 10ms を一時的に超えても実害は小さい。超過でエラーになる場合は反復回数を下げ、§5.3 のロックアウトで補う。
 - ログインに成功したら 32 バイトのランダムトークンを発行する。DB にはトークンの **SHA-256 ハッシュ**だけを `sessions` に保存する。
-- Cookie: `sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`
-- 状態を変える API（POST/PUT/DELETE）では `Origin` ヘッダーを検証し、CSRF を防ぐ。
+- Cookie: `sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`Domain` 属性を付けないので、Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
+- 状態を変える API（POST/PUT/DELETE）では `Origin` ヘッダーが `https://admin.etlits.dev` であることを検証し、CSRF を防ぐ。
 - 期限切れセッションは、ログインのたびに古い行を削除して掃除する（Cron は使わない）。
 
 ### 5.3 総当たり対策
@@ -228,7 +235,7 @@ CREATE TABLE settings (
 - **リッチ → HTML**: Tiptap が出力した HTML をそのまま CodeMirror で開く。情報は欠けない。
 - **HTML → リッチ**: Tiptap が扱えないタグや属性（`<script>`、独自 class、`<iframe>` など）は消える可能性がある。切り替え前に読み込み後の HTML と比較し、差分があれば「一部の HTML が失われます」と警告して確認を取る。HTML モードで書いた記事は、基本的に HTML モードで編集し続ける運用を想定する。
 - **サニタイズしない**: 執筆者は本人一人なので、HTML モードでは任意の HTML（埋め込みウィジェットなど）を許可する。リッチモードは Tiptap のスキーマが許すタグしか出力しない。
-  - ただし、自分の記事に入れたスクリプトは管理画面と同じオリジンで動く。外部の埋め込みコードは信頼できるものだけ貼る、と README に注意を書く。（管理画面の配置は §15 を参照。）
+  - 記事内のスクリプトは公開ホスト（`etlits.dev`）でだけ動き、管理ホストの Cookie や API には届かない（§2）。
 - **保存時の処理**（Worker の `HTMLRewriter` で行う）:
   1. `<img src="/media/...">` を出現順に集め、`post_media` を更新する。
   2. `cover_auto = 1` なら、先頭の画像を `cover_media_id` に設定する。
@@ -307,7 +314,7 @@ post: post { title, bodyHtml, dateLabel, updatedLabel, cover, tags[] }, prev { t
 
 ### 8.3 編集画面
 - CodeMirror 6 で編集する。スマホでは全画面エディタにし、キーボードの上に `{{ }}` `<` `>` `/` `"` を入力する補助バーを出す。
-- **プレビュー**: `POST /api/admin/preview` に未保存のテンプレートとサンプルデータ（最新記事）を送り、`iframe srcdoc` に描画する。
+- **プレビュー**: `POST /api/admin/preview` に未保存のテンプレートとサンプルデータ（最新記事）を送り、`iframe srcdoc` に描画する。iframe には `sandbox="allow-scripts"` を付け、`allow-same-origin` は付けない。こうすると、プレビュー内のスクリプトは管理画面とは別の（どこにも属さない）オリジンで動き、管理画面の Cookie や API に触れられない。記事のプレビューも同じ方式にする。
 - **保存時の検証**: Mustache のパースに失敗したら保存しない（閉じ忘れの `{{#posts}}` など）。
 - **履歴**: 保存のたびに `template_revisions` に記録する（テンプレートごとに直近 30 件。超えた分は削除）。差分を見て任意の版に戻せる。
 - **初期値に戻す**: 初期テンプレートはソースコードに同梱しておき、いつでもリセットできる。
@@ -445,7 +452,7 @@ blog-cms/
 ├─ migrations/
 │   └─ 0001_init.sql
 ├─ src/                      # Worker
-│   ├─ index.ts              # Hono アプリのエントリ
+│   ├─ index.ts              # Hono アプリのエントリ（Host で公開 / 管理を振り分け）
 │   ├─ routes/
 │   │   ├─ public.ts         # /, /posts, /tags, /p, feed, sitemap
 │   │   ├─ media.ts          # /media/*
@@ -458,7 +465,7 @@ blog-cms/
 │   │   ├─ storage.ts        # R2 への画像保存・取得
 │   │   └─ tags.ts           # 正規化
 │   └─ defaults/             # 初期テンプレートと CSS（*.mustache, site.css）
-├─ admin/                    # 管理画面 SPA (React + Vite)
+├─ admin/                    # 管理画面 SPA (React + Vite, base: /admin/)
 │   ├─ src/
 │   │   ├─ pages/            # Login, Setup, Posts, PostEdit, Media, Tags, Design, Pages, Settings
 │   │   ├─ components/       # RichEditor(Tiptap), CodeEditor(CodeMirror), TagInput, ImagePicker, BottomNav
@@ -491,4 +498,4 @@ blog-cms/
 | 画像ストレージ | R2（カード登録済み） |
 | コメント欄・サイト内検索 | 作らない |
 | テンプレート構文 | Mustache |
-| 管理画面 | React + Vite + TypeScript |
+| 管理画面 | React + Vite + TypeScript。`admin.etlits.dev` に分けて配置する |
