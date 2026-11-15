@@ -242,3 +242,9 @@ describe('パスワード変更', () => {
     expect(newLogin.status).toBe(200);
   });
 });
+
+describe('管理画面の配信', () => {
+  it('ファイルらしきパスには index.html を返さない', async () => {
+    expect((await SELF.fetch(`${ADMIN}/favicon.ico`)).status).toBe(404);
+  });
+});

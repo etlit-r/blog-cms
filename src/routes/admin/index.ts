@@ -64,6 +64,12 @@ adminApp.get('/admin/*', async (c) => {
   return new Response(res.body, res);
 });
 
+// ファイルらしきパス（favicon.ico など）に index.html を返さない
+adminApp.get('*', async (c, next) => {
+  if (/\.[a-z0-9]+$/i.test(c.req.path)) return c.notFound();
+  await next();
+});
+
 // それ以外のパスはすべて SPA の index.html を返し、画面遷移は React Router に任せる
 adminApp.get('*', async (c) => {
   const res = await c.env.ASSETS.fetch(new Request(new URL('/admin/', c.req.url), c.req.raw));

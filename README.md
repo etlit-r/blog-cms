@@ -62,7 +62,11 @@ npm run deploy
 
 アカウントを削除してから、もう一度セットアップします（記事などのデータは消えません）。
 
+アカウントを削除すると、セットアップトークンを知っている人なら誰でもアカウントを作れる状態になります。
+**先にトークンを新しい値に変えてから**、アカウントを削除してください。
+
 ```sh
+npx wrangler secret put SETUP_TOKEN
 npx wrangler d1 execute blog-cms --remote --command "DELETE FROM sessions; DELETE FROM users;"
 ```
 

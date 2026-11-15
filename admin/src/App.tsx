@@ -11,8 +11,8 @@ import { Setup } from './pages/Setup';
 /** ログイン状態に応じて、セットアップ画面・ログイン画面へ振り分ける */
 function RequireAuth() {
   const { status, error, refresh } = useAuth();
-  if (error) return <FullScreenMessage message={error} onRetry={refresh} />;
-  if (!status) return <FullScreenMessage message="読み込み中…" />;
+  // 状態をまだ一度も取得できていないときだけ全画面で表示する（取得済みなら画面はそのまま残す）
+  if (!status) return error ? <FullScreenMessage message={error} onRetry={refresh} /> : <FullScreenMessage message="読み込み中…" />;
   if (status.setupRequired) return <Navigate to="/setup" replace />;
   if (!status.loggedIn) return <Navigate to="/login" replace />;
   return <Outlet />;

@@ -50,8 +50,8 @@ function lockedResponse(c: Context<AppEnv>, seconds: number) {
 
 /** 画面の出し分けに使う状態（ログイン前でも呼べる） */
 auth.get('/status', async (c) => {
-  const user = await getUser(c.env.DB);
-  const loggedIn = user !== null && (await isValidSession(c.env.DB, getSessionToken(c)));
+  const [user, sessionOk] = await Promise.all([getUser(c.env.DB), isValidSession(c.env.DB, getSessionToken(c))]);
+  const loggedIn = user !== null && sessionOk;
   return c.json({
     setupRequired: user === null,
     loggedIn,
