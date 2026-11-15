@@ -36,8 +36,9 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 ```
 
 - **Worker 1 本**に `etlits.dev`（公開）と `admin.etlits.dev`（管理）の 2 つの Custom Domain を割り当て、`Host` ヘッダーで処理を振り分ける。公開ホストでは管理 API・管理画面を一切返さず（404）、管理ホストでは公開ページを返さない。どちらにも当てはまらない `Host`（`www.etlits.dev` など）には 404 を返す。
+  - ホスト名はコードに直接書かず、`wrangler.jsonc` の `vars`（`PUBLIC_HOST` / `ADMIN_HOST`）から読む。本番では `etlits.dev` / `admin.etlits.dev`、ローカル開発（`wrangler dev`）とテストでは `localhost` 系の値（例: `localhost:8787` / `admin.localhost:8787`）を `env.dev` などで設定する。§5.2 の `Origin` 検証も `ADMIN_HOST` を基準にする。
 - 管理画面を別オリジンに分けることで、記事に貼ったスクリプトや埋め込みコードが公開サイトで動いても、管理画面の Cookie や API には触れられない。
-- **管理画面は静的 SPA** にして Workers Static Assets から配信する。ビルド成果物は `public/admin/` に置き、`assets.run_worker_first: ["/admin/*"]` を指定する。これにより公開ホストから `/admin/*` を直接取得できないよう Worker で 404 を返す。管理ホストでは `/admin/*`（Vite が出力した JS / CSS）をそのまま `ASSETS` に渡し、それ以外の画面パスには `public/admin/index.html` を返す。管理画面へのリクエストもすべて Worker を経由してリクエスト数に数えられるが、アクセスは少ないので影響は小さい。
+- **管理画面は静的 SPA** にして Workers Static Assets から配信する。ビルド成果物は `public/admin/` に置き、`assets` に `directory: "./public"`、`binding: "ASSETS"`、`run_worker_first: ["/admin/*"]` を指定する。これにより公開ホストから `/admin/*` を直接取得できないよう Worker で 404 を返す。管理ホストでは `/admin/*`（Vite が出力した JS / CSS）をそのまま `ASSETS` に渡し、それ以外の画面パスには `public/admin/index.html` を返す。管理画面へのリクエストもすべて Worker を経由してリクエスト数に数えられるが、アクセスは少ないので影響は小さい。
 - 公開ページは **サーバーサイドレンダリング（SSR）** する。D1 にあるテンプレートへデータを流し込んで HTML を返す。クライアント JS がなくても表示でき、表示が速く SEO にも向く。
 
 ---
@@ -104,7 +105,7 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 - ログインに成功したら 32 バイトのランダムトークンを発行する。DB にはトークンの **SHA-256 ハッシュ**だけを `sessions` に保存する。
 - Cookie: `__Host-sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`Domain` 属性を付けないので、Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
   - `__Host-` プレフィックスを付けるのは、公開ホストで動く記事内スクリプトが `Domain=etlits.dev` の同名 Cookie を設定して管理ホストへ送り込む攻撃（Cookie tossing / セッション固定）を防ぐため。`__Host-` 付きの Cookie は `Domain` 指定つきでは設定できない。
-- `etlits.dev` と `admin.etlits.dev` は同じサイト（same-site）なので、`SameSite=Strict` では公開ホストからのリクエストを防げない。そのため、状態を変える API（POST/PUT/DELETE。ログイン・セットアップを含む）では `Origin` ヘッダーが `https://admin.etlits.dev` であることを検証し、`Origin` がないリクエストも拒否して CSRF を防ぐ。
+- `etlits.dev` と `admin.etlits.dev` は同じサイト（same-site）なので、`SameSite=Strict` では公開ホストからのリクエストを防げない。そのため、状態を変える API（POST/PUT/DELETE。ログイン・セットアップを含む）では `Origin` ヘッダーが管理ホストのオリジン（本番では `https://admin.etlits.dev`。§2 の `ADMIN_HOST` から組み立てる。スキームは本番が `https`、ローカル開発が `http` なので、`Origin` のホスト部分を `ADMIN_HOST` と比べる）であることを検証し、`Origin` がないリクエストも拒否して CSRF を防ぐ。
 - 期限切れセッションは、ログインのたびに古い行を削除して掃除する（Cron は使わない）。
 
 ### 5.3 総当たり対策
@@ -237,7 +238,7 @@ CREATE TABLE settings (
 - **リッチ → HTML**: Tiptap が出力した HTML をそのまま CodeMirror で開く。情報は欠けない。
 - **HTML → リッチ**: Tiptap が扱えないタグや属性（`<script>`、独自 class、`<iframe>` など）は消える可能性がある。切り替え前に読み込み後の HTML と比較し、差分があれば「一部の HTML が失われます」と警告して確認を取る。HTML モードで書いた記事は、基本的に HTML モードで編集し続ける運用を想定する。
 - **サニタイズしない**: 執筆者は本人一人なので、HTML モードでは任意の HTML（埋め込みウィジェットなど）を許可する。リッチモードは Tiptap のスキーマが許すタグしか出力しない。
-  - 記事内のスクリプトは公開ホスト（`etlits.dev`）でだけ動き、管理ホストの Cookie や API には届かない（§2）。
+  - 記事内のスクリプトが動くのは、公開ホスト（`etlits.dev`）と、管理画面の記事プレビュー（どこにも属さないオリジンの sandbox iframe。§8.3）だけ。どちらからも管理ホストの Cookie や API には届かない（§2）。
 - **保存時の処理**（Worker の `HTMLRewriter` で行う）:
   1. `<img src="/media/...">` を出現順に集め、`post_media` を更新する。
   2. `cover_auto = 1` なら、先頭の画像を `cover_media_id` に設定する。
@@ -317,7 +318,7 @@ post: post { title, bodyHtml, dateLabel, updatedLabel, cover, tags[] }, prev { t
 ### 8.3 編集画面
 - CodeMirror 6 で編集する。スマホでは全画面エディタにし、キーボードの上に `{{ }}` `<` `>` `/` `"` を入力する補助バーを出す。
 - **プレビュー**: `POST /api/admin/preview` に未保存のテンプレートとサンプルデータ（最新記事）を送り、`iframe srcdoc` に描画する。iframe には `sandbox="allow-scripts"` を付け、`allow-same-origin` は付けない。こうすると、プレビュー内のスクリプトは管理画面とは別の（どこにも属さない）オリジンで動き、管理画面の Cookie や API に触れられない。記事のプレビューも同じ方式にする。
-  - srcdoc の相対 URL は管理ホストを基準に解決されるが、管理ホストは `/assets/site.css` や公開ページを返さない。そのためプレビュー API は、CSS（未保存の CSS を含む）を `<style>` として HTML に埋め込み、ページへのリンクは `https://etlits.dev` の絶対 URL で出力する（`/media/*` は管理ホストでも返すのでそのままでよい）。
+  - srcdoc の相対 URL は管理ホストを基準に解決されるが、管理ホストは `/assets/site.css` や公開ページを返さない。そのためプレビュー API は、テンプレート変数 `cssUrl` に CSS（未保存の CSS を含む）を UTF-8 で Base64 化した `data:text/css;base64,...` URL を渡す（`#fff` の `#` などで URL が途切れないよう、Base64 にする）（`layout` の `<link href="{{cssUrl}}">` を書き換えずに済む）。また、ページへのリンクは `https://etlits.dev` の絶対 URL で出力する（`/media/*` は管理ホストでも返すのでそのままでよい）。
 - **保存時の検証**: Mustache のパースに失敗したら保存しない（閉じ忘れの `{{#posts}}` など）。
 - **履歴**: 保存のたびに `template_revisions` に記録する（テンプレートごとに直近 30 件。超えた分は削除）。差分を見て任意の版に戻せる。
 - **初期値に戻す**: 初期テンプレートはソースコードに同梱しておき、いつでもリセットできる。
