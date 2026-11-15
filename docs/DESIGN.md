@@ -101,7 +101,7 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 ### 5.2 ログインとセッション
 - パスワードは **PBKDF2-SHA256（WebCrypto）**、16 バイトのソルトでハッシュ化する。workerd の上限である 100,000 回で反復する。ログインはまれなので、無料枠の CPU 10ms を一時的に超えても実害は小さい。超過でエラーになる場合は反復回数を下げ、§5.3 のロックアウトで補う。
 - ログインに成功したら 32 バイトのランダムトークンを発行する。DB にはトークンの **SHA-256 ハッシュ**だけを `sessions` に保存する。
-- Cookie: `sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`Domain` 属性を付けないので、Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
+- Cookie: `__Host-sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`__Host-` 接頭辞により、ブラウザは `Domain` 属性のない Cookie しか受け付けない。そのため Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
 - 状態を変える API（POST/PUT/DELETE）では `Origin` ヘッダーが `https://admin.etlits.dev` であることを検証し、CSRF を防ぐ。
 - 期限切れセッションは、ログインのたびに古い行を削除して掃除する（Cron は使わない）。
 

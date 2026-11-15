@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "blog-cms",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+
+  // 公開サイト (etlits.dev) と管理画面 (admin.etlits.dev) を同じ Worker に割り当てる
+  "routes": [
+    { "pattern": "etlits.dev", "custom_domain": true },
+    { "pattern": "admin.etlits.dev", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "vars": {
+    "PUBLIC_HOST": "etlits.dev",
+    "ADMIN_HOST": "admin.etlits.dev"
+  },
+
+  // 管理画面 SPA のビルド成果物 (public/admin/*)。
+  // /admin/* は必ず Worker を経由させ、公開ホストからは取得できないようにする。
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/admin/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "blog-cms",
+      // `npx wrangler d1 create blog-cms` で表示された ID に置き換える
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "blog-cms-media" }
+  ],
+
+  "observability": { "enabled": true }
+}

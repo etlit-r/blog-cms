@@ -1,0 +1,71 @@
+import { Hono } from 'hono';
+import type { AppEnv } from '../../env';
+import { isValidSession } from '../../lib/auth';
+import { apiError } from '../../lib/http';
+import { auth, getSessionToken } from './auth';
+
+/** ログインなしで呼べる API */
+const PUBLIC_API_PATHS = new Set(['/api/admin/auth/status', '/api/admin/auth/setup', '/api/admin/auth/login', '/api/admin/auth/logout']);
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+export const adminApp = new Hono<AppEnv>();
+
+// 管理画面全体に付けるセキュリティヘッダー
+adminApp.use('*', async (c, next) => {
+  await next();
+  c.header('X-Content-Type-Options', 'nosniff');
+  c.header('X-Frame-Options', 'DENY');
+  c.header('Referrer-Policy', 'same-origin');
+  c.header('X-Robots-Tag', 'noindex, nofollow');
+});
+
+// ---------- API ----------
+
+adminApp.use('/api/admin/*', async (c, next) => {
+  // CSRF 対策: 状態を変えるリクエストは、管理ホスト自身から送られたものだけを受け付ける
+  if (!SAFE_METHODS.has(c.req.method)) {
+    const origin = c.req.header('Origin');
+    const requestUrl = new URL(c.req.url);
+    let ok = false;
+    if (origin) {
+      try {
+        const o = new URL(origin);
+        ok = o.host === c.env.ADMIN_HOST && o.protocol === requestUrl.protocol;
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) return apiError(c, 403, 'invalid_origin', '不正なリクエスト元です');
+  }
+
+  if (!PUBLIC_API_PATHS.has(c.req.path) && !(await isValidSession(c.env.DB, getSessionToken(c)))) {
+    return apiError(c, 401, 'unauthorized', 'ログインしてください');
+  }
+
+  await next();
+  c.header('Cache-Control', 'no-store');
+});
+
+adminApp.route('/api/admin/auth', auth);
+
+adminApp.all('/api/*', (c) => apiError(c, 404, 'not_found', 'API が見つかりません'));
+
+// ---------- 管理画面 SPA ----------
+
+// ビルド済みの JS / CSS（public/admin/assets/* など）
+adminApp.get('/admin/*', async (c) => {
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  return new Response(res.body, res);
+});
+
+// それ以外のパスはすべて SPA の index.html を返し、画面遷移は React Router に任せる
+adminApp.get('*', async (c) => {
+  const res = await c.env.ASSETS.fetch(new Request(new URL('/admin/', c.req.url), c.req.raw));
+  if (!res.ok) {
+    return c.text('管理画面がビルドされていません。`npm run build` を実行してください', 503);
+  }
+  const out = new Response(res.body, res);
+  out.headers.set('Cache-Control', 'no-cache');
+  return out;
+});
