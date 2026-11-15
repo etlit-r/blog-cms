@@ -35,9 +35,9 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
                          └───────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Worker 1 本**に `etlits.dev`（公開）と `admin.etlits.dev`（管理）の 2 つの Custom Domain を割り当て、`Host` ヘッダーで処理を振り分ける。公開ホストでは管理 API・管理画面を一切返さず（404）、管理ホストでは公開ページを返さない。
+- **Worker 1 本**に `etlits.dev`（公開）と `admin.etlits.dev`（管理）の 2 つの Custom Domain を割り当て、`Host` ヘッダーで処理を振り分ける。公開ホストでは管理 API・管理画面を一切返さず（404）、管理ホストでは公開ページを返さない。どちらにも当てはまらない `Host`（`www.etlits.dev` など）には 404 を返す。
 - 管理画面を別オリジンに分けることで、記事に貼ったスクリプトや埋め込みコードが公開サイトで動いても、管理画面の Cookie や API には触れられない。
-- **管理画面は静的 SPA** にして Workers Static Assets から配信する。ビルド成果物は `public/admin/` に置き、`assets.run_worker_first: ["/admin/*"]` を指定する。これにより公開ホストから `/admin/*` を直接取得できないよう Worker で 404 を返し、管理ホストではパスを書き換えて SPA を返す。管理画面へのアクセスは少ないので、Worker を経由してもリクエスト数への影響は小さい。
+- **管理画面は静的 SPA** にして Workers Static Assets から配信する。ビルド成果物は `public/admin/` に置き、`assets.run_worker_first: ["/admin/*"]` を指定する。これにより公開ホストから `/admin/*` を直接取得できないよう Worker で 404 を返す。管理ホストでは `/admin/*`（Vite が出力した JS / CSS）をそのまま `ASSETS` に渡し、それ以外の画面パスには `public/admin/index.html` を返す。管理画面へのリクエストもすべて Worker を経由してリクエスト数に数えられるが、アクセスは少ないので影響は小さい。
 - 公開ページは **サーバーサイドレンダリング（SSR）** する。D1 にあるテンプレートへデータを流し込んで HTML を返す。クライアント JS がなくても表示でき、表示が速く SEO にも向く。
 
 ---
@@ -78,6 +78,7 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 | パス | 内容 |
 |------|------|
 | `/` 以下（下記以外すべて） | 管理画面 SPA（React Router が画面を切り替える。Worker が `public/admin/index.html` を返す） |
+| `/admin/*` | SPA のビルド成果物（JS / CSS など。Worker が `ASSETS` にそのまま渡す） |
 | `/setup` | 初回アカウント作成（アカウント作成後は無効） |
 | `/api/admin/*` | JSON API（`/api/admin/auth/*` 以外はログイン必須） |
 | `/media/:key` | 画像（エディタ内で本文の相対パス `/media/...` を表示するため、公開側と同じものを返す） |
@@ -101,8 +102,9 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 ### 5.2 ログインとセッション
 - パスワードは **PBKDF2-SHA256（WebCrypto）**、16 バイトのソルトでハッシュ化する。workerd の上限である 100,000 回で反復する。ログインはまれなので、無料枠の CPU 10ms を一時的に超えても実害は小さい。超過でエラーになる場合は反復回数を下げ、§5.3 のロックアウトで補う。
 - ログインに成功したら 32 バイトのランダムトークンを発行する。DB にはトークンの **SHA-256 ハッシュ**だけを `sessions` に保存する。
-- Cookie: `sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`Domain` 属性を付けないので、Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
-- 状態を変える API（POST/PUT/DELETE）では `Origin` ヘッダーが `https://admin.etlits.dev` であることを検証し、CSRF を防ぐ。
+- Cookie: `__Host-sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`Domain` 属性を付けないので、Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
+  - `__Host-` プレフィックスを付けるのは、公開ホストで動く記事内スクリプトが `Domain=etlits.dev` の同名 Cookie を設定して管理ホストへ送り込む攻撃（Cookie tossing / セッション固定）を防ぐため。`__Host-` 付きの Cookie は `Domain` 指定つきでは設定できない。
+- `etlits.dev` と `admin.etlits.dev` は同じサイト（same-site）なので、`SameSite=Strict` では公開ホストからのリクエストを防げない。そのため、状態を変える API（POST/PUT/DELETE。ログイン・セットアップを含む）では `Origin` ヘッダーが `https://admin.etlits.dev` であることを検証し、`Origin` がないリクエストも拒否して CSRF を防ぐ。
 - 期限切れセッションは、ログインのたびに古い行を削除して掃除する（Cron は使わない）。
 
 ### 5.3 総当たり対策
@@ -315,6 +317,7 @@ post: post { title, bodyHtml, dateLabel, updatedLabel, cover, tags[] }, prev { t
 ### 8.3 編集画面
 - CodeMirror 6 で編集する。スマホでは全画面エディタにし、キーボードの上に `{{ }}` `<` `>` `/` `"` を入力する補助バーを出す。
 - **プレビュー**: `POST /api/admin/preview` に未保存のテンプレートとサンプルデータ（最新記事）を送り、`iframe srcdoc` に描画する。iframe には `sandbox="allow-scripts"` を付け、`allow-same-origin` は付けない。こうすると、プレビュー内のスクリプトは管理画面とは別の（どこにも属さない）オリジンで動き、管理画面の Cookie や API に触れられない。記事のプレビューも同じ方式にする。
+  - srcdoc の相対 URL は管理ホストを基準に解決されるが、管理ホストは `/assets/site.css` や公開ページを返さない。そのためプレビュー API は、CSS（未保存の CSS を含む）を `<style>` として HTML に埋め込み、ページへのリンクは `https://etlits.dev` の絶対 URL で出力する（`/media/*` は管理ホストでも返すのでそのままでよい）。
 - **保存時の検証**: Mustache のパースに失敗したら保存しない（閉じ忘れの `{{#posts}}` など）。
 - **履歴**: 保存のたびに `template_revisions` に記録する（テンプレートごとに直近 30 件。超えた分は削除）。差分を見て任意の版に戻せる。
 - **初期値に戻す**: 初期テンプレートはソースコードに同梱しておき、いつでもリセットできる。
@@ -400,8 +403,8 @@ post: post { title, bodyHtml, dateLabel, updatedLabel, cover, tags[] }, prev { t
 
 | サービス | 無料枠（2026 年 11 月時点で要再確認） | 本設計での使い方 |
 |---------|-------------------------------|-----------------|
-| Workers | 10 万リクエスト/日、CPU 10ms/リクエスト | 公開ページ・API・画像配信。静的アセット（管理画面）は数えられない |
-| Workers Static Assets | 無料・無制限 | 管理画面 SPA、ファビコンなど |
+| Workers | 10 万リクエスト/日、CPU 10ms/リクエスト | 公開ページ・API・画像配信・管理画面（`run_worker_first` と SPA の振り分けのため、管理画面の配信も数えられる） |
+| Workers Static Assets | 無料・無制限 | 管理画面 SPA のファイル置き場、ファビコンなど |
 | D1 | 5GB、読み取り 500 万行/日、書き込み 10 万行/日 | トップ表示 1 回あたり数十行程度の読み取り |
 | R2 | 10GB、Class A 100 万回/月、Class B 1,000 万回/月、転送量無料 | 1 枚約 300KB + 80KB として、およそ 2.5 万枚まで |
 
