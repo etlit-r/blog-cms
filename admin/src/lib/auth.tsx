@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, type AuthStatus } from './api';
+import { api, UNAUTHORIZED_EVENT, type AuthStatus } from './api';
 
 type AuthContextValue = {
   status: AuthStatus | null;
@@ -25,6 +25,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh();
+    const onUnauthorized = () => void refresh();
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, [refresh]);
 
   return <AuthContext.Provider value={{ status, error, refresh }}>{children}</AuthContext.Provider>;

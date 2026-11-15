@@ -22,6 +22,12 @@ adminApp.use('*', async (c, next) => {
 
 // ---------- API ----------
 
+// API の応答はキャッシュさせない（下のミドルウェアが途中で返すエラーにも付くよう、別のミドルウェアにする）
+adminApp.use('/api/*', async (c, next) => {
+  await next();
+  c.header('Cache-Control', 'no-store');
+});
+
 adminApp.use('/api/admin/*', async (c, next) => {
   // CSRF 対策: 状態を変えるリクエストは、管理ホスト自身から送られたものだけを受け付ける
   if (!SAFE_METHODS.has(c.req.method)) {
@@ -44,7 +50,6 @@ adminApp.use('/api/admin/*', async (c, next) => {
   }
 
   await next();
-  c.header('Cache-Control', 'no-store');
 });
 
 adminApp.route('/api/admin/auth', auth);

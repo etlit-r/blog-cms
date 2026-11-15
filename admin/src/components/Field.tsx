@@ -8,8 +8,12 @@ export function Field({ label, hint, ...input }: Props) {
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
-      <input id={id} {...input} />
-      {hint && <p className="hint">{hint}</p>}
+      <input id={id} aria-describedby={hint ? `${id}-hint` : undefined} {...input} />
+      {hint && (
+        <p id={`${id}-hint`} className="hint">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

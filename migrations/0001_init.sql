@@ -20,11 +20,11 @@ CREATE TABLE sessions (
 );
 CREATE INDEX idx_sessions_expires ON sessions(expires_at);
 
+-- IP ごとの試行回数（window_start から LOGIN_WINDOW_SECONDS の間に attempts 回）
 CREATE TABLE login_attempts (
   ip           TEXT PRIMARY KEY,
-  fail_count   INTEGER NOT NULL,
-  first_at     INTEGER NOT NULL,
-  locked_until INTEGER
+  attempts     INTEGER NOT NULL,
+  window_start INTEGER NOT NULL
 );
 
 -- 画像

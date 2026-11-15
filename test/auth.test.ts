@@ -74,6 +74,11 @@ describe('初回セットアップ', () => {
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first('n')).toBe(0);
   });
 
+  it('セットアップトークンの総当たりもロックされる', async () => {
+    for (let i = 0; i < 5; i++) expect((await setup({ setupToken: `guess-${i}` })).status).toBe(403);
+    expect((await setup()).status).toBe(429);
+  });
+
   it('短いパスワードは拒否する', async () => {
     const res = await setup({ password: 'short' });
     expect(res.status).toBe(400);
@@ -168,6 +173,19 @@ describe('ログイン', () => {
     expect((await login(PASSWORD, '198.51.100.7')).status).toBe(200);
   });
 
+  it('同時に大量に送られても、照合まで進むのは 5 回だけ', async () => {
+    const results = await Promise.all(Array.from({ length: 20 }, () => login('wrong password!!')));
+    const statuses = results.map((r) => r.status);
+    expect(statuses.filter((s) => s === 401)).toHaveLength(5);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(15);
+  });
+
+  it('ログインに成功すると試行回数がリセットされる', async () => {
+    for (let i = 0; i < 4; i++) await login('wrong password!!');
+    expect((await login(PASSWORD)).status).toBe(200);
+    for (let i = 0; i < 4; i++) expect((await login('wrong password!!')).status).toBe(401);
+  });
+
   it('ログアウトするとセッションが無効になる', async () => {
     const cookie = sessionCookie(await login(PASSWORD));
     expect((await api('/auth/logout', { method: 'POST', cookie })).status).toBe(200);
@@ -180,6 +198,14 @@ describe('ログインが必要な API', () => {
   it('セッションなしでは 401', async () => {
     await setup();
     expect((await api('/posts')).status).toBe(401);
+  });
+
+  it('エラー応答にもキャッシュ禁止のヘッダーが付く', async () => {
+    const res = await api('/posts');
+    expect(res.status).toBe(401);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    const forbidden = await setup({}, { origin: PUBLIC });
+    expect(forbidden.headers.get('Cache-Control')).toBe('no-store');
   });
 
   it('偽のセッションでは 401', async () => {

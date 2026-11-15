@@ -6,9 +6,9 @@ export const PBKDF2_ITERATIONS = 100_000;
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 日
 export const SESSION_COOKIE = '__Host-sid';
 
+/** IP ごとに、この時間内に試せるのは LOGIN_MAX_ATTEMPTS 回まで */
 export const LOGIN_WINDOW_SECONDS = 15 * 60;
-export const LOGIN_MAX_FAILURES = 5;
-export const LOGIN_LOCK_SECONDS = 15 * 60;
+export const LOGIN_MAX_ATTEMPTS = 5;
 
 export const USERNAME_MAX = 64;
 export const PASSWORD_MIN = 10;
@@ -66,41 +66,54 @@ export async function getUser(db: D1Database): Promise<UserRow | null> {
 export async function createUser(db: D1Database, username: string, password: string): Promise<boolean> {
   const { hash, salt, iterations } = await hashPassword(password);
   const t = now();
-  try {
-    const result = await db
-      .prepare(
-        `INSERT INTO users (id, username, password_hash, password_salt, iterations, created_at, updated_at)
-         VALUES (1, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(username.trim(), hash, salt, iterations, t, t)
-      .run();
-    return result.meta.changes === 1;
-  } catch (e) {
-    if (String(e).includes('UNIQUE constraint failed') || String(e).includes('CHECK constraint failed')) return false;
-    throw e;
-  }
+  const result = await db
+    .prepare(
+      `INSERT INTO users (id, username, password_hash, password_salt, iterations, created_at, updated_at)
+       VALUES (1, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO NOTHING`,
+    )
+    .bind(username.trim(), hash, salt, iterations, t, t)
+    .run();
+  return result.meta.changes === 1;
 }
 
-export async function updatePassword(db: D1Database, password: string): Promise<void> {
+/**
+ * パスワードを変更し、すべてのセッションを無効にしたうえで新しいセッションを 1 つ発行する。
+ * 3 つの書き込みは 1 回の batch（トランザクション）で行うので、途中で失敗して中途半端な状態にならない。
+ */
+export async function changePassword(db: D1Database, password: string, userAgent: string | undefined): Promise<string> {
   const { hash, salt, iterations } = await hashPassword(password);
-  await db
-    .prepare('UPDATE users SET password_hash = ?, password_salt = ?, iterations = ?, updated_at = ? WHERE id = 1')
-    .bind(hash, salt, iterations, now())
-    .run();
+  const { token, statement } = await newSession(db, userAgent);
+  await db.batch([
+    db
+      .prepare('UPDATE users SET password_hash = ?, password_salt = ?, iterations = ?, updated_at = ? WHERE id = 1')
+      .bind(hash, salt, iterations, now()),
+    db.prepare('DELETE FROM sessions'),
+    statement,
+  ]);
+  return token;
 }
 
 // ---------- セッション ----------
 
-/** セッションを作成し、Cookie に入れる生のトークンを返す（DB にはハッシュだけを保存） */
-export async function createSession(db: D1Database, userAgent: string | undefined): Promise<string> {
+async function newSession(db: D1Database, userAgent: string | undefined) {
   const token = randomToken(32);
   const t = now();
+  const statement = db
+    .prepare('INSERT INTO sessions (token_hash, expires_at, created_at, user_agent) VALUES (?, ?, ?, ?)')
+    .bind(await sha256Hex(token), t + SESSION_TTL_SECONDS, t, userAgent?.slice(0, 256) ?? null);
+  return { token, statement };
+}
+
+/** セッションを作成し、Cookie に入れる生のトークンを返す（DB にはハッシュだけを保存） */
+export async function createSession(db: D1Database, userAgent: string | undefined): Promise<string> {
+  const { token, statement } = await newSession(db, userAgent);
+  const t = now();
   await db.batch([
-    // 期限切れセッションの掃除（Cron を使わずログイン時に行う）
+    // 期限切れのセッションと古い試行記録の掃除（Cron を使わずログイン時に行う）
     db.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(t),
-    db
-      .prepare('INSERT INTO sessions (token_hash, expires_at, created_at, user_agent) VALUES (?, ?, ?, ?)')
-      .bind(await sha256Hex(token), t + SESSION_TTL_SECONDS, t, userAgent?.slice(0, 256) ?? null),
+    db.prepare('DELETE FROM login_attempts WHERE window_start <= ?').bind(t - LOGIN_WINDOW_SECONDS),
+    statement,
   ]);
   return token;
 }
@@ -119,41 +132,29 @@ export async function deleteSession(db: D1Database, token: string | undefined): 
   await db.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(await sha256Hex(token)).run();
 }
 
-export async function deleteAllSessions(db: D1Database): Promise<void> {
-  await db.prepare('DELETE FROM sessions').run();
-}
-
 // ---------- ログイン試行の制限 ----------
 
-/** ロック中ならロック解除までの秒数、ロックされていなければ 0 */
-export async function lockedSeconds(db: D1Database, ip: string): Promise<number> {
-  const row = await db.prepare('SELECT locked_until FROM login_attempts WHERE ip = ?').bind(ip).first<{ locked_until: number | null }>();
-  const t = now();
-  return row?.locked_until && row.locked_until > t ? row.locked_until - t : 0;
-}
-
-export async function recordLoginFailure(db: D1Database, ip: string): Promise<void> {
+/**
+ * 試行を 1 回分記録し、上限を超えていればロック解除までの秒数を返す（超えていなければ 0）。
+ * パスワードを照合する「前」に 1 回の UPSERT で数えるので、同時に大量のリクエストを送られても
+ * 照合まで進めるのは LOGIN_MAX_ATTEMPTS 回だけになる。成功したら clearLoginAttempts で消す。
+ */
+export async function consumeLoginAttempt(db: D1Database, ip: string): Promise<number> {
   const t = now();
   const row = await db
-    .prepare('SELECT fail_count, first_at FROM login_attempts WHERE ip = ?')
-    .bind(ip)
-    .first<{ fail_count: number; first_at: number }>();
-
-  // 一定時間が経っていれば数え直す
-  const inWindow = row !== null && t - row.first_at < LOGIN_WINDOW_SECONDS;
-  const failCount = inWindow ? row.fail_count + 1 : 1;
-  const firstAt = inWindow ? row.first_at : t;
-  const lockedUntil = failCount >= LOGIN_MAX_FAILURES ? t + LOGIN_LOCK_SECONDS : null;
-
-  await db
     .prepare(
-      `INSERT INTO login_attempts (ip, fail_count, first_at, locked_until) VALUES (?, ?, ?, ?)
-       ON CONFLICT(ip) DO UPDATE SET fail_count = excluded.fail_count, first_at = excluded.first_at, locked_until = excluded.locked_until`,
+      `INSERT INTO login_attempts (ip, attempts, window_start) VALUES (?1, 1, ?2)
+       ON CONFLICT(ip) DO UPDATE SET
+         attempts     = CASE WHEN ?2 - window_start >= ?3 THEN 1  ELSE attempts + 1 END,
+         window_start = CASE WHEN ?2 - window_start >= ?3 THEN ?2 ELSE window_start END
+       RETURNING attempts, window_start`,
     )
-    .bind(ip, lockedUntil ? 0 : failCount, lockedUntil ? t : firstAt, lockedUntil)
-    .run();
+    .bind(ip, t, LOGIN_WINDOW_SECONDS)
+    .first<{ attempts: number; window_start: number }>();
+  if (!row || row.attempts <= LOGIN_MAX_ATTEMPTS) return 0;
+  return Math.max(1, row.window_start + LOGIN_WINDOW_SECONDS - t);
 }
 
-export async function clearLoginFailures(db: D1Database, ip: string): Promise<void> {
+export async function clearLoginAttempts(db: D1Database, ip: string): Promise<void> {
   await db.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run();
 }

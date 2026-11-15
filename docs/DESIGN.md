@@ -106,7 +106,9 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 - 期限切れセッションは、ログインのたびに古い行を削除して掃除する（Cron は使わない）。
 
 ### 5.3 総当たり対策
-- `login_attempts` テーブルに IP（`CF-Connecting-IP`）ごとの失敗回数を記録する。15 分間に 5 回失敗したら 15 分ロックする。
+- `login_attempts` テーブルに IP（`CF-Connecting-IP`）ごとの試行回数を記録する。15 分間に試せるのは 5 回までで、超えるとその 15 分が終わるまでロックする。
+- 回数は、パスワードを照合する**前**に 1 回の UPSERT（`RETURNING` つき）で増やす。同時に大量のリクエストを送られても照合まで進めるのは 5 回だけになる。成功したら記録を消す。
+- ログイン・セットアップトークンの照合・パスワード変更時の現在のパスワード確認のすべてに適用する。
 - 必要なら Cloudflare ダッシュボードの WAF レート制限ルール（無料プランで 1 ルール）を `/api/admin/auth/login` に設定する。
 
 ### 5.4 将来の拡張
@@ -138,10 +140,9 @@ CREATE TABLE sessions (
 );
 
 CREATE TABLE login_attempts (
-  ip          TEXT PRIMARY KEY,
-  fail_count  INTEGER NOT NULL,
-  first_at    INTEGER NOT NULL,
-  locked_until INTEGER
+  ip           TEXT PRIMARY KEY,
+  attempts     INTEGER NOT NULL,       -- window_start からの試行回数
+  window_start INTEGER NOT NULL
 );
 
 -- 記事
