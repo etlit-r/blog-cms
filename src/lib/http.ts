@@ -21,3 +21,14 @@ export async function readJson(c: Context): Promise<Record<string, unknown> | nu
     return null;
   }
 }
+
+/** URL の :id を正の整数として読む。不正なら null */
+export function parseId(raw: string): number | null {
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/** LIKE の特殊文字をエスケープする（SQL 側では ESCAPE '\' と組み合わせて使う） */
+export function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}

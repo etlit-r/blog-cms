@@ -3,6 +3,9 @@ import type { AppEnv } from '../../env';
 import { isValidSession } from '../../lib/auth';
 import { apiError } from '../../lib/http';
 import { auth, getSessionToken } from './auth';
+import { posts } from './posts';
+import { settings } from './settings';
+import { tags } from './tags';
 
 /** ログインなしで呼べる API */
 const PUBLIC_API_PATHS = new Set(['/api/admin/auth/status', '/api/admin/auth/setup', '/api/admin/auth/login', '/api/admin/auth/logout']);
@@ -53,6 +56,9 @@ adminApp.use('/api/admin/*', async (c, next) => {
 });
 
 adminApp.route('/api/admin/auth', auth);
+adminApp.route('/api/admin/posts', posts);
+adminApp.route('/api/admin/tags', tags);
+adminApp.route('/api/admin/settings', settings);
 
 adminApp.all('/api/*', (c) => apiError(c, 404, 'not_found', 'API が見つかりません'));
 

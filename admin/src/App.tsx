@@ -4,9 +4,11 @@ import { AuthProvider, useAuth } from './lib/auth';
 import { Design } from './pages/Design';
 import { Login } from './pages/Login';
 import { Media } from './pages/Media';
+import { PostEdit } from './pages/PostEdit';
 import { Posts } from './pages/Posts';
 import { Settings } from './pages/Settings';
 import { Setup } from './pages/Setup';
+import { Tags } from './pages/Tags';
 
 /** ログイン状態に応じて、セットアップ画面・ログイン画面へ振り分ける */
 function RequireAuth() {
@@ -41,11 +43,15 @@ const router = createBrowserRouter([
         element: <Layout />,
         children: [
           { index: true, element: <Posts /> },
+          { path: 'tags', element: <Tags /> },
           { path: 'media', element: <Media /> },
           { path: 'design', element: <Design /> },
           { path: 'settings', element: <Settings /> },
         ],
       },
+      // 記事の編集は画面を広く使うため、下部タブのない専用レイアウトにする
+      { path: 'posts/new', element: <PostEdit /> },
+      { path: 'posts/:id', element: <PostEdit /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

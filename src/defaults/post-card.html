@@ -1,0 +1,18 @@
+<article class="post-card{{#featured}} is-featured{{/featured}}{{^cover}} no-cover{{/cover}}">
+  <a href="{{url}}" class="post-card-link">
+    {{#cover}}
+    <img class="post-card-cover" src="{{src}}" {{#srcset}}srcset="{{srcset}}" sizes="(min-width: 641px) 50vw, 100vw"{{/srcset}}
+      width="{{width}}" height="{{height}}" alt="{{alt}}" {{#eager}}fetchpriority="high"{{/eager}}{{^eager}}loading="lazy"{{/eager}} decoding="async">
+    {{/cover}}
+    <div class="post-card-body">
+      <p class="post-meta"><time datetime="{{dateIso}}">{{dateLabel}}</time></p>
+      <h2 class="post-card-title">{{title}}</h2>
+      {{#excerpt}}<p class="post-card-excerpt">{{excerpt}}</p>{{/excerpt}}
+    </div>
+  </a>
+  {{#hasTags}}
+  <ul class="tag-list">
+    {{#tags}}<li><a href="{{url}}">#{{name}}</a></li>{{/tags}}
+  </ul>
+  {{/hasTags}}
+</article>
