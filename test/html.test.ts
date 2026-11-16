@@ -14,6 +14,10 @@ describe('extractText', () => {
     expect(await extractText('<p>A &amp; B &lt;tag&gt; &#x1F600; &#12354;</p>')).toBe('A & B <tag> 😀 あ');
   });
 
+  it('よく使う名前付き文字参照も戻す', async () => {
+    expect(await extractText('<p>A&mdash;B&hellip; &ldquo;C&rdquo; &copy;</p>')).toBe('A—B… “C” ©');
+  });
+
   it('改行タグで単語がくっつかない', async () => {
     expect(await extractText('一行目<br>二行目')).toBe('一行目 二行目');
   });

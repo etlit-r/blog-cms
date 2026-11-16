@@ -19,12 +19,12 @@ export function Tags() {
 
   useEffect(() => void load(), [load]);
 
-  async function run(action: () => Promise<unknown>, success: string) {
+  async function run<T>(action: () => Promise<T>, success: string | ((result: T) => string)) {
     setMessage(null);
     try {
-      await action();
+      const result = await action();
       setEditing(null);
-      setMessage({ type: 'success', text: success });
+      setMessage({ type: 'success', text: typeof success === 'function' ? success(result) : success });
       await load();
     } catch (e) {
       setMessage({ type: 'error', text: e instanceof Error ? e.message : String(e) });
@@ -93,7 +93,10 @@ export function Tags() {
           className="btn"
           onClick={() =>
             window.confirm(`未使用のタグ ${unused} 件を削除しますか？`) &&
-            void run(() => api('/tags/delete-unused', { method: 'POST' }), `未使用のタグを ${unused} 件削除しました`)
+            void run(
+              () => api<{ deleted: number }>('/tags/delete-unused', { method: 'POST' }),
+              ({ deleted }) => `未使用のタグを ${deleted} 件削除しました`,
+            )
           }
         >
           未使用のタグをまとめて削除（{unused}件）

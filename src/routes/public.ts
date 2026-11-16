@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
-import { dateIso, dateLabel } from '../lib/dates';
+import { currentYear, dateIso, dateLabel } from '../lib/dates';
 import { now } from '../lib/http';
 import { TAGS_JSON_SQL, parseTags } from '../lib/posts';
 import { cssHash, renderPage, siteCss } from '../lib/render';
@@ -61,7 +61,7 @@ function baseView(c: C, settings: SiteSettings, page: { title?: string; descript
       ogType: page.ogType ?? 'website',
       ogImage: null, // フェーズ 3 でカバー画像を入れる
     },
-    year: new Date().getFullYear(),
+    year: currentYear(),
   };
 }
 
@@ -201,7 +201,7 @@ publicApp.get('/posts/:slug', async (c) => {
   const settings = await getSettings(db);
   const tags = tagsView(post.tags_json);
   const view = {
-    ...baseView(c, settings, { title: post.title, description: post.excerpt ?? undefined, path: `/posts/${post.slug}`, ogType: 'article' }),
+    ...baseView(c, settings, { title: post.title, description: post.excerpt || undefined, path: `/posts/${post.slug}`, ogType: 'article' }),
     post: {
       title: post.title,
       bodyHtml: post.body_html,

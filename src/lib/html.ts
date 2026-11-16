@@ -4,7 +4,12 @@ const VOID_ELEMENTS = new Set(['br', 'hr']);
 /** 中身を本文テキストとして扱わない要素 */
 const SKIP_ELEMENTS = 'script, style, template, noscript, iframe, svg';
 
-const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  hellip: '…', mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
+  laquo: '«', raquo: '»', middot: '·', bull: '•', copy: '©', reg: '®', trade: '™',
+  times: '×', divide: '÷', deg: '°', yen: '¥', euro: '€', larr: '←', rarr: '→', uarr: '↑', darr: '↓',
+};
 
 export function decodeEntities(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, code: string) => {
@@ -12,7 +17,7 @@ export function decodeEntities(s: string): string {
       const n = code[1] === 'x' || code[1] === 'X' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
       return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
     }
-    return NAMED_ENTITIES[code.toLowerCase()] ?? m;
+    return NAMED_ENTITIES[code] ?? NAMED_ENTITIES[code.toLowerCase()] ?? m;
   });
 }
 

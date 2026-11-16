@@ -10,7 +10,7 @@ export type TemplateSet = Record<string, string>;
 
 /** 初期テンプレートに、DB に保存された（管理画面で編集した）テンプレートを上書きしたもの */
 export async function loadTemplates(db: D1Database): Promise<TemplateSet> {
-  const set: TemplateSet = Object.fromEntries(Object.entries(DEFAULT_TEMPLATES).map(([name, t]) => [name, t.content]));
+  const set = defaultTemplates();
   const { results } = await db.prepare('SELECT name, content FROM templates').all<{ name: string; content: string }>();
   for (const row of results) if (row.name in set) set[row.name] = row.content;
   return set;
@@ -55,7 +55,7 @@ export async function renderPage(db: D1Database, pageName: string, view: Record<
   } catch (e) {
     const defaults = defaultTemplates();
     const fallbackView = { ...view, cssUrl: `/assets/site.css?v=${await cssHash(defaults['css:site']!)}&fallback=1` };
-    const message = String(e instanceof Error ? e.message : e).replace(/--/g, '- -');
+    const message = String(e instanceof Error ? e.message : e).replace(/-/g, '- ').replace(/>/g, '&gt;');
     return `<!-- テンプレートの描画に失敗したため、初期テンプレートで表示しています: ${message} -->\n` + renderWith(defaults, pageName, fallbackView);
   }
 }

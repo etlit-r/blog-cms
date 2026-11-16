@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { api } from '../lib/api';
 import { STATE_LABELS, formatDateTime } from '../lib/format';
@@ -20,9 +20,12 @@ export function Posts() {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** 最後に出したリクエストの番号。古いリクエストの応答（絞り込みを変える前のもの）は捨てる */
+  const latestRequest = useRef(0);
 
   const load = useCallback(
     async (cursor: string | null) => {
+      const requestId = ++latestRequest.current;
       const params = new URLSearchParams();
       if (state) params.set('state', state);
       if (query.trim()) params.set('q', query.trim());
@@ -31,12 +34,13 @@ export function Posts() {
       setError(null);
       try {
         const res = await api<ListResponse>(`/posts?${params}`);
+        if (requestId !== latestRequest.current) return;
         setItems((prev) => (cursor ? [...prev, ...res.items] : res.items));
         setNextCursor(res.nextCursor);
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        if (requestId === latestRequest.current) setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setLoading(false);
+        if (requestId === latestRequest.current) setLoading(false);
       }
     },
     [state, query],

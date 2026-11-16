@@ -48,6 +48,8 @@ export function PostEdit() {
   const leaving = useRef(false);
 
   useEffect(() => {
+    // posts/new → posts/:id の移動では同じ画面が使い回されるので、ここで戻す
+    leaving.current = false;
     if (isNew) return;
     let cancelled = false;
     api<{ post: Post }>(`/posts/${id}`)
