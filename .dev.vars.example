@@ -1,0 +1,5 @@
+# ローカル開発用。`.dev.vars` にコピーして使う（.dev.vars は Git に含めない）
+# ブラウザは *.localhost を自分の PC として扱うので、2 つのホストを localhost で再現できる
+PUBLIC_HOST=localhost:8787
+ADMIN_HOST=admin.localhost:8787
+SETUP_TOKEN=local-setup-token

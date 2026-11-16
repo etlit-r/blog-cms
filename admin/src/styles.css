@@ -1,0 +1,242 @@
+/* 管理画面の共通スタイル（スマホ基準） */
+:root {
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --text: #1b1d22;
+  --muted: #646b78;
+  --border: #dcdfe5;
+  --accent: #2459d6;
+  --accent-text: #ffffff;
+  --danger: #c62f2f;
+  --success: #1d7a46;
+  --radius: 12px;
+  --tap: 48px;
+  --nav-height: 60px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d;
+    --surface: #20232a;
+    --text: #e9ebef;
+    --muted: #9aa1ad;
+    --border: #353943;
+    --accent: #6d95ff;
+    --accent-text: #0e1116;
+    --danger: #ff7b7b;
+    --success: #5fd394;
+    color-scheme: dark;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+  font-size: 16px; /* 16px 未満だと iOS で入力時に自動ズームされる */
+  line-height: 1.6;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin-bottom: 8px;
+}
+
+/* ---------- レイアウト ---------- */
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.app-header h1 {
+  font-size: 1.15rem;
+}
+
+.app-main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 16px calc(var(--nav-height) + env(safe-area-inset-bottom) + 24px);
+}
+
+.bottom-nav {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  height: calc(var(--nav-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.bottom-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.bottom-nav a.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.bottom-nav svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.auth-screen {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 48px) 16px 48px;
+}
+
+.auth-screen h1 {
+  font-size: 1.5rem;
+  margin-bottom: 8px;
+}
+
+.auth-screen .lead {
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+.auth-screen .card {
+  margin-top: 16px;
+}
+
+.center-screen {
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  gap: 16px;
+  padding: 16px;
+  text-align: center;
+}
+
+/* ---------- 部品 ---------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stack-lg {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.field input {
+  min-height: var(--tap);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.field input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.success {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.btn {
+  min-height: var(--tap);
+  padding: 0 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn.primary {
+  width: 100%;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.card > .hint {
+  margin-bottom: 16px;
+}

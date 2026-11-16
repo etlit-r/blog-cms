@@ -101,12 +101,14 @@ Cloudflare Workers の無料枠で動く、スマホ中心で運用する一人�
 ### 5.2 ログインとセッション
 - パスワードは **PBKDF2-SHA256（WebCrypto）**、16 バイトのソルトでハッシュ化する。workerd の上限である 100,000 回で反復する。ログインはまれなので、無料枠の CPU 10ms を一時的に超えても実害は小さい。超過でエラーになる場合は反復回数を下げ、§5.3 のロックアウトで補う。
 - ログインに成功したら 32 バイトのランダムトークンを発行する。DB にはトークンの **SHA-256 ハッシュ**だけを `sessions` に保存する。
-- Cookie: `sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`Domain` 属性を付けないので、Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
+- Cookie: `__Host-sid=<token>; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=30日`。`__Host-` 接頭辞により、ブラウザは `Domain` 属性のない Cookie しか受け付けない。そのため Cookie は `admin.etlits.dev` にしか送られない（公開ホストの `etlits.dev` には送られない）。
 - 状態を変える API（POST/PUT/DELETE）では `Origin` ヘッダーが `https://admin.etlits.dev` であることを検証し、CSRF を防ぐ。
 - 期限切れセッションは、ログインのたびに古い行を削除して掃除する（Cron は使わない）。
 
 ### 5.3 総当たり対策
-- `login_attempts` テーブルに IP（`CF-Connecting-IP`）ごとの失敗回数を記録する。15 分間に 5 回失敗したら 15 分ロックする。
+- `login_attempts` テーブルに IP（`CF-Connecting-IP`）ごとの試行回数を記録する。15 分間に試せるのは 5 回までで、超えるとその 15 分が終わるまでロックする。
+- 回数は、パスワードを照合する**前**に 1 回の UPSERT（`RETURNING` つき）で増やす。同時に大量のリクエストを送られても照合まで進めるのは 5 回だけになる。成功したら記録を消す。
+- ログイン・セットアップトークンの照合・パスワード変更時の現在のパスワード確認のすべてに適用する。
 - 必要なら Cloudflare ダッシュボードの WAF レート制限ルール（無料プランで 1 ルール）を `/api/admin/auth/login` に設定する。
 
 ### 5.4 将来の拡張
@@ -138,10 +140,9 @@ CREATE TABLE sessions (
 );
 
 CREATE TABLE login_attempts (
-  ip          TEXT PRIMARY KEY,
-  fail_count  INTEGER NOT NULL,
-  first_at    INTEGER NOT NULL,
-  locked_until INTEGER
+  ip           TEXT PRIMARY KEY,
+  attempts     INTEGER NOT NULL,       -- window_start からの試行回数
+  window_start INTEGER NOT NULL
 );
 
 -- 記事
