@@ -1,8 +1,13 @@
 import type { Context } from 'hono';
 import type { AppEnv } from '../env';
-import { MEDIA_KEY_PATTERN } from '../lib/media';
+import { MEDIA_KEY_PATTERN, safeDecode } from '../lib/media';
 
 const IMMUTABLE = 'public, max-age=31536000, immutable';
+
+/** Cache API のキー。どちらのホストから来ても同じキャッシュを使う */
+export function mediaCacheKey(publicHost: string, key: string): Request {
+  return new Request(`https://${publicHost}/media/${key}`);
+}
 
 /**
  * GET /media/<key> — R2 の画像を返す（公開ホスト・管理ホストの両方）。
@@ -10,11 +15,10 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
  * Worker の Cache API にも入れ、R2 の読み取り回数を減らす。
  */
 export async function serveMedia(c: Context<AppEnv>) {
-  const key = decodeURIComponent(c.req.path.slice('/media/'.length));
-  if (!MEDIA_KEY_PATTERN.test(key)) return c.notFound();
+  const key = safeDecode(c.req.path.slice('/media/'.length));
+  if (!key || !MEDIA_KEY_PATTERN.test(key)) return c.notFound();
 
-  // どちらのホストから来ても同じキャッシュを使う
-  const cacheKey = new Request(`https://${c.env.PUBLIC_HOST}/media/${key}`);
+  const cacheKey = mediaCacheKey(c.env.PUBLIC_HOST, key);
   const cache = caches.default;
   let res = await cache.match(cacheKey);
 

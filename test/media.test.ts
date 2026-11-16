@@ -86,6 +86,12 @@ describe('アップロード', () => {
   it('存在しないキーや不正なキーは 404', async () => {
     expect((await SELF.fetch(`${PUBLIC}/media/img/2026/11/01JCXXXXXXXXXXXXXXXXXXXXXX.webp`)).status).toBe(404);
     expect((await SELF.fetch(`${PUBLIC}/media/../secret`)).status).toBe(404);
+    expect((await SELF.fetch(`${PUBLIC}/media/%E0`)).status).toBe(404);
+  });
+
+  it('本文に壊れた URL の画像があっても保存できる', async () => {
+    const post = await createPost({ bodyHtml: '<img src="/media/%E0">' });
+    expect(post.coverUrl).toBeNull();
   });
 });
 
@@ -190,6 +196,14 @@ describe('メディアの管理', () => {
     expect(second.nextCursor).toBeNull();
   });
 
+  it('カバーにだけ使っている画像も使用中として数える', async () => {
+    const { media: a } = await upload();
+    const { media: b } = await upload();
+    await createPost({ bodyHtml: img(a!), coverImage: b!.url });
+    const { items } = (await (await api('/media', { cookie })).json()) as { items: ApiMedia[] };
+    expect(items.find((m) => m.id === b!.id)!.usageCount).toBe(1);
+  });
+
   it('代替テキストを変更できる', async () => {
     const { media } = await upload();
     expect((await api(`/media/${media!.id}`, { method: 'PUT', cookie, body: { alt: '新しい説明' } })).status).toBe(200);
@@ -220,5 +234,16 @@ describe('メディアの管理', () => {
     const { media } = await upload();
     expect((await api(`/media/${media!.id}`, { method: 'DELETE', cookie })).status).toBe(200);
     expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM media').first('n')).toBe(0);
+  });
+
+  it('削除した画像はキャッシュからも配信されない', async () => {
+    const { media } = await upload();
+    const first = await SELF.fetch(`${PUBLIC}${media!.url}`);
+    expect(first.status).toBe(200);
+    await first.arrayBuffer();
+    // キャッシュへの保存（waitUntil）が終わるのを待つ
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await api(`/media/${media!.id}`, { method: 'DELETE', cookie })).status).toBe(200);
+    expect((await SELF.fetch(`${PUBLIC}${media!.url}`)).status).toBe(404);
   });
 });

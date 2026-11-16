@@ -45,7 +45,7 @@ function tagsView(json: string | null) {
   return parseTags(json).map((name) => ({ name, url: tagUrl(name) }));
 }
 
-function coverView(row: ListRow, eager: boolean) {
+function coverView(row: ListRow, eager: boolean, featured = false) {
   if (!row.cover_key || !row.cover_thumb_key || !row.cover_width || !row.cover_height) return null;
   const media = { r2_key: row.cover_key, thumb_key: row.cover_thumb_key, width: row.cover_width, height: row.cover_height };
   return {
@@ -56,6 +56,8 @@ function coverView(row: ListRow, eager: boolean) {
     alt: row.cover_alt ?? '',
     // 画面の最初に見える画像だけすぐ読み込み、ほかは近づいてから読み込む
     eager,
+    // カードの表示幅（site.css のグリッドに合わせる）。先頭の大きいカードは本文の幅いっぱい
+    sizes: featured ? '(min-width: 1152px) 1120px, 100vw' : '(min-width: 1024px) 360px, (min-width: 641px) 50vw, 100vw',
   };
 }
 
@@ -70,7 +72,7 @@ function cardView(row: ListRow, featured: boolean, eager: boolean) {
     tags,
     hasTags: tags.length > 0,
     featured,
-    cover: coverView(row, eager),
+    cover: coverView(row, eager, featured),
   };
 }
 
@@ -252,7 +254,7 @@ publicApp.get('/posts/:slug', async (c) => {
     post: {
       title: post.title,
       bodyHtml: await enhanceBodyImages(post.body_html, mediaByKey, c.env.PUBLIC_HOST),
-      cover: coverView(post, true),
+      cover: coverView(post, true, true),
       dateLabel: dateLabel(post.published_at),
       dateIso: dateIso(post.published_at),
       tags,

@@ -27,6 +27,15 @@ export type MediaMime = keyof typeof EXTENSIONS;
 /** 保存先のキー（例: img/2026/11/01JCXXXXXXXXXXXXXXXXXXXXXX.webp、サムネイルは -w800 付き） */
 export const MEDIA_KEY_PATTERN = /^img\/\d{4}\/\d{2}\/[0-9A-HJKMNP-TV-Z]{26}(?:-w800)?\.(?:webp|jpg|png)$/;
 
+/** decodeURIComponent の例外（不正な %xx）を null にする */
+export function safeDecode(s: string): string | null {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
 export function mediaUrl(key: string): string {
   return `/media/${key}`;
 }
@@ -107,8 +116,8 @@ export function mediaKeyFromSrc(src: string, publicHost: string): string | null 
     path = absolute[2]!;
   }
   if (!path.startsWith('/media/')) return null;
-  const key = decodeURIComponent(path.slice('/media/'.length).split(/[?#]/)[0]!);
-  return MEDIA_KEY_PATTERN.test(key) ? key : null;
+  const key = safeDecode(path.slice('/media/'.length).split(/[?#]/)[0]!);
+  return key && MEDIA_KEY_PATTERN.test(key) ? key : null;
 }
 
 /** 本文に出てくるメディアのキー（出現順・重複なし）。サムネイルのキーは元画像のキーにそろえる */

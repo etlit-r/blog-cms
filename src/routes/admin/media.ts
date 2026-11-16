@@ -12,11 +12,15 @@ import {
   type MediaRow,
 } from '../../lib/media';
 import { bumpContentVersionStatement } from '../../lib/settings';
+import { mediaCacheKey } from '../media';
 
 export const media = new Hono<AppEnv>();
 
 const PAGE_SIZE = 30;
-const USAGE_SQL = '(SELECT COUNT(*) FROM post_media pm WHERE pm.media_id = m.id) AS usage_count';
+/** 画像を使っている記事の数（本文で使っている記事と、カバーにしている記事。usedBy と同じ条件） */
+const USAGE_SQL = `(SELECT COUNT(*) FROM posts p
+    WHERE p.cover_media_id = m.id OR EXISTS (SELECT 1 FROM post_media pm WHERE pm.post_id = p.id AND pm.media_id = m.id)
+  ) AS usage_count`;
 
 async function readImage(value: unknown, label: string): Promise<{ bytes: Uint8Array; mime: MediaMime } | string> {
   if (!(value instanceof File)) return `${label}が送られていません`;
@@ -61,9 +65,8 @@ media.post('/', async (c) => {
 
   const { key, thumbKey } = newMediaKeys(original.mime);
   const httpMetadata = { contentType: original.mime, cacheControl: 'public, max-age=31536000, immutable' };
-  await Promise.all([c.env.MEDIA.put(key, original.bytes, { httpMetadata }), c.env.MEDIA.put(thumbKey, thumb.bytes, { httpMetadata })]);
-
   try {
+    await Promise.all([c.env.MEDIA.put(key, original.bytes, { httpMetadata }), c.env.MEDIA.put(thumbKey, thumb.bytes, { httpMetadata })]);
     const row = await c.env.DB.prepare(
       `INSERT INTO media (r2_key, thumb_key, mime, width, height, bytes, alt, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
@@ -72,8 +75,8 @@ media.post('/', async (c) => {
       .first<MediaRow>();
     return c.json({ media: toApiMedia({ ...row!, usage_count: 0 }) }, 201);
   } catch (e) {
-    // DB に記録できなかったファイルは R2 に残さない
-    await c.env.MEDIA.delete([key, thumbKey]);
+    // 片方だけ保存できた場合や、DB に記録できなかった場合は、R2 に何も残さない
+    await c.env.MEDIA.delete([key, thumbKey]).catch(() => {});
     throw e;
   }
 });
@@ -142,6 +145,9 @@ media.delete('/:id', async (c) => {
     bumpContentVersionStatement(db),
   ]);
   await c.env.MEDIA.delete([row.r2_key, row.thumb_key]);
+  // この Worker のキャッシュからも消す（消さないと、削除した画像が配信され続ける）
+  const cache = caches.default;
+  await Promise.all([row.r2_key, row.thumb_key].map((k) => cache.delete(mediaCacheKey(c.env.PUBLIC_HOST, k))));
   return c.json({ ok: true });
 });
 

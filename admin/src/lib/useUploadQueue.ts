@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { Media } from './types';
 import { uploadImage } from './upload';
 
@@ -18,6 +18,8 @@ let nextKey = 1;
  */
 export function useUploadQueue() {
   const [items, setItems] = useState<UploadItem[]>([]);
+  /** 前に始めたアップロード。後から選んだ画像は、これが終わってから送る */
+  const running = useRef<Promise<unknown>>(Promise.resolve());
 
   const update = (key: number, patch: Partial<UploadItem>) => setItems((list) => list.map((it) => (it.key === key ? { ...it, ...patch } : it)));
 
@@ -29,6 +31,16 @@ export function useUploadQueue() {
       ...queued.map(({ file, key }) => ({ key, name: file.name || '画像', progress: 0, status: 'waiting' as const })),
     ]);
 
+    const previous = running.current;
+    const run = (async () => {
+      await previous.catch(() => {});
+      return uploadAll(queued);
+    })();
+    running.current = run;
+    return run;
+  }, []);
+
+  async function uploadAll(queued: { file: File; key: number }[]): Promise<Media[]> {
     const uploaded: Media[] = [];
     for (const { file, key } of queued) {
       update(key, { status: 'uploading' });
@@ -42,7 +54,7 @@ export function useUploadQueue() {
     // 成功したものは少ししてから一覧から消す
     setTimeout(() => setItems((list) => list.filter((it) => it.status !== 'done')), 1500);
     return uploaded;
-  }, []);
+  }
 
   const dismiss = useCallback((key: number) => setItems((list) => list.filter((it) => it.key !== key)), []);
   const busy = items.some((it) => it.status === 'waiting' || it.status === 'uploading');

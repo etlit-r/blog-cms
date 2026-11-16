@@ -118,11 +118,8 @@ export function PostEdit() {
   }
 
   async function uploadAndInsert(files: File[]) {
-    // アップロード中に入力が進んでも、選んだ時点の位置に入れる
-    const at = selection.current;
-    const uploaded = await uploads.upload(files);
-    if (at) selection.current = at;
-    insertImages(uploaded);
+    // アップロード中に入力が進むこともあるので、挿入位置は終わった時点のカーソル位置にする
+    insertImages(await uploads.upload(files));
   }
 
   /** 本文の入力欄に画像を貼り付け・ドロップしたらアップロードする */
