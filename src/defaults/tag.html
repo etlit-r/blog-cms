@@ -1,0 +1,8 @@
+<header class="page-header">
+  <h1 class="page-heading">#{{tag.name}}</h1>
+  <p class="page-sub">{{tag.count}}件の記事</p>
+</header>
+<div class="post-list">
+  {{#posts}}{{> post-card}}{{/posts}}
+</div>
+{{> pager}}

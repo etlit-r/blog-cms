@@ -153,6 +153,7 @@ CREATE TABLE posts (
   body_html      TEXT NOT NULL DEFAULT '',
   editor_mode    TEXT NOT NULL DEFAULT 'rich' CHECK (editor_mode IN ('rich','html')),
   excerpt        TEXT,                   -- 未入力なら本文から自動生成した値を入れる
+  excerpt_auto   INTEGER NOT NULL DEFAULT 1,  -- 1: 本文から自動生成（保存のたびに作り直す） / 0: 手動入力（migrations/0002 で追加）
   cover_media_id INTEGER REFERENCES media(id) ON DELETE SET NULL,
   cover_auto     INTEGER NOT NULL DEFAULT 1,  -- 1: 本文の先頭画像に自動追従 / 0: 手動指定
   status         TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published')),

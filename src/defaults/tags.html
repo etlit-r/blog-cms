@@ -1,0 +1,9 @@
+<header class="page-header">
+  <h1 class="page-heading">タグ</h1>
+</header>
+{{#hasTags}}
+<ul class="tag-cloud">
+  {{#tags}}<li><a href="{{url}}">#{{name}}<span class="tag-count">{{count}}</span></a></li>{{/tags}}
+</ul>
+{{/hasTags}}
+{{^hasTags}}<p class="empty">タグはまだありません。</p>{{/hasTags}}

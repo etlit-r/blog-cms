@@ -4,6 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
 
+  // 初期テンプレート (src/defaults/*.html, *.css) を文字列として読み込む
+  "rules": [{ "type": "Text", "globs": ["**/*.html", "**/*.css"], "fallthrough": true }],
+
   // 公開サイト (etlits.dev) と管理画面 (admin.etlits.dev) を同じ Worker に割り当てる
   "routes": [
     { "pattern": "etlits.dev", "custom_domain": true },

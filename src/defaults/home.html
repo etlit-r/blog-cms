@@ -1,0 +1,6 @@
+<h1 class="visually-hidden">新着記事</h1>
+<div class="post-list">
+  {{#posts}}{{> post-card}}{{/posts}}
+</div>
+{{^posts}}<p class="empty">まだ記事がありません。</p>{{/posts}}
+{{> pager}}

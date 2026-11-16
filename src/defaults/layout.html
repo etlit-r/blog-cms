@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{page.title}}</title>
+  {{#page.description}}
+  <meta name="description" content="{{page.description}}">
+  <meta property="og:description" content="{{page.description}}">
+  {{/page.description}}
+  <meta property="og:title" content="{{page.title}}">
+  <meta property="og:type" content="{{page.ogType}}">
+  <meta property="og:url" content="{{page.url}}">
+  <meta property="og:site_name" content="{{site.title}}">
+  {{#page.ogImage}}
+  <meta property="og:image" content="{{page.ogImage}}">
+  <meta name="twitter:card" content="summary_large_image">
+  {{/page.ogImage}}
+  <link rel="canonical" href="{{page.url}}">
+  <link rel="stylesheet" href="{{cssUrl}}">
+</head>
+<body>
+  {{> header}}
+  <main class="site-main">
+    {{{content}}}
+  </main>
+  {{> footer}}
+</body>
+</html>

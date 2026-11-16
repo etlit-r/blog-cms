@@ -11,18 +11,19 @@ const TABS = [
 export function Layout() {
   const { pathname } = useLocation();
   const current = TABS.find((t) => (t.end ? pathname === t.to : pathname.startsWith(t.to)));
+  const title = pathname === '/tags' ? 'タグ管理' : (current?.label ?? '管理画面');
 
   return (
     <div className="app">
       <header className="app-header">
-        <h1>{current?.label ?? '管理画面'}</h1>
+        <h1>{title}</h1>
       </header>
       <main className="app-main">
         <Outlet />
       </main>
       <nav className="bottom-nav" aria-label="メインメニュー">
         {TABS.map((tab) => (
-          <NavLink key={tab.to} to={tab.to} end={tab.end}>
+          <NavLink key={tab.to} to={tab.to} end={tab.end} className={tab.to === '/' && pathname === '/tags' ? 'active' : undefined}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d={tab.icon} />
             </svg>

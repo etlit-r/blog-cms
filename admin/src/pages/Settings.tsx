@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Field } from '../components/Field';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useSettings } from '../lib/useSettings';
+import type { SiteSettings } from '../lib/types';
 import { useSubmit } from '../lib/useSubmit';
 
 export function Settings() {
@@ -31,6 +33,8 @@ export function Settings() {
 
   return (
     <div className="stack-lg">
+      <SiteSettingsForm />
+
       <section className="card stack">
         <h2>アカウント</h2>
         <p>
@@ -59,5 +63,52 @@ export function Settings() {
         </form>
       </section>
     </div>
+  );
+}
+
+function SiteSettingsForm() {
+  const { settings, setSettings, error: loadError } = useSettings();
+  const [siteTitle, setSiteTitle] = useState('');
+  const [siteDescription, setSiteDescription] = useState('');
+  const [postsPerPage, setPostsPerPage] = useState('10');
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!settings) return;
+    setSiteTitle(settings.siteTitle);
+    setSiteDescription(settings.siteDescription);
+    setPostsPerPage(String(settings.postsPerPage));
+  }, [settings]);
+
+  const form = useSubmit(async () => {
+    setDone(false);
+    const next = await api<SiteSettings>('/settings', {
+      method: 'PUT',
+      body: { siteTitle, siteDescription, postsPerPage: Number(postsPerPage) },
+    });
+    setSettings(next);
+    setDone(true);
+  });
+
+  return (
+    <section className="card">
+      <h2>サイト</h2>
+      {loadError && <p className="error" role="alert">{loadError}</p>}
+      {settings && (
+        <form onSubmit={form.onSubmit} className="stack">
+          <Field label="サイト名" required maxLength={100} value={siteTitle} onChange={(e) => setSiteTitle(e.target.value)} />
+          <Field label="説明" hint="検索結果や SNS で表示される紹介文" maxLength={300} value={siteDescription} onChange={(e) => setSiteDescription(e.target.value)} />
+          <Field label="1ページの記事数" type="number" inputMode="numeric" min={1} max={50} required value={postsPerPage} onChange={(e) => setPostsPerPage(e.target.value)} />
+          <a href={settings.publicUrl} target="_blank" rel="noopener" className="hint">
+            {settings.publicUrl} を開く
+          </a>
+          {form.error && <p className="error" role="alert">{form.error}</p>}
+          {done && <p className="success" role="status">保存しました</p>}
+          <button type="submit" className="btn primary" disabled={form.pending}>
+            {form.pending ? '保存中…' : '保存'}
+          </button>
+        </form>
+      )}
+    </section>
   );
 }
