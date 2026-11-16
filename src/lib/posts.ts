@@ -1,6 +1,7 @@
 import { randomBytes } from './crypto';
 import { makeExcerpt } from './html';
 import { now } from './http';
+import { coverAutoStatement, extractMediaKeys, mediaKeyFromSrc, mediaUrl, setPostMediaStatements } from './media';
 import { bumpContentVersionStatement } from './settings';
 import { normalizeTagNames, setPostTagsStatements } from './tags';
 
@@ -28,6 +29,10 @@ export type PostRow = {
   created_at: number;
   updated_at: number;
   tags_json: string | null;
+  cover_auto: number;
+  cover_media_id: number | null;
+  /** カバー画像の R2 キー（media と結合して取得） */
+  cover_key: string | null;
 };
 
 export type PostInput = {
@@ -39,6 +44,8 @@ export type PostInput = {
   status: PostStatus;
   publishedAt: number | null;
   tags: string[];
+  /** 手動で選んだカバー画像のキー。null なら本文の先頭の画像を自動でカバーにする */
+  coverKey: string | null;
 };
 
 export function postState(status: PostStatus, publishedAt: number | null, t = now()): PostState {
@@ -75,6 +82,8 @@ export function toApiPost(row: PostRow) {
     editorMode: row.editor_mode,
     excerpt: row.excerpt ?? '',
     excerptAuto: row.excerpt_auto === 1,
+    coverAuto: row.cover_auto === 1,
+    coverUrl: row.cover_key ? mediaUrl(row.cover_key) : null,
   };
 }
 
@@ -89,8 +98,8 @@ export function parseTags(json: string | null): string[] {
 }
 
 /** API のリクエストボディを検証して PostInput にする */
-export function parsePostInput(body: Record<string, unknown>): { value: PostInput } | { error: string } {
-  const { title, slug, bodyHtml, editorMode, excerpt, status, publishedAt, tags } = body;
+export function parsePostInput(body: Record<string, unknown>, publicHost: string): { value: PostInput } | { error: string } {
+  const { title, slug, bodyHtml, editorMode, excerpt, status, publishedAt, tags, coverImage } = body;
 
   if (typeof title !== 'string') return { error: 'タイトルの形式が正しくありません' };
   const cleanTitle = title.trim();
@@ -134,6 +143,14 @@ export function parsePostInput(body: Record<string, unknown>): { value: PostInpu
   const normalized = normalizeTagNames(tags);
   if ('error' in normalized) return { error: normalized.error };
 
+  // カバー画像は src（/media/...）で指定する。未指定・null なら自動
+  let coverKey: string | null = null;
+  if (coverImage !== undefined && coverImage !== null) {
+    coverKey = typeof coverImage === 'string' ? mediaKeyFromSrc(coverImage, publicHost) : null;
+    if (!coverKey) return { error: 'カバー画像の指定が正しくありません' };
+    coverKey = coverKey.replace(/-w800(\.\w+)$/, '$1');
+  }
+
   return {
     value: {
       title: cleanTitle,
@@ -144,6 +161,7 @@ export function parsePostInput(body: Record<string, unknown>): { value: PostInpu
       status,
       publishedAt: pubAt,
       tags: normalized.names,
+      coverKey,
     },
   };
 }
@@ -184,21 +202,41 @@ export async function uniqueSlug(db: D1Database, base: string, exceptId?: number
 }
 
 export async function getPost(db: D1Database, id: number): Promise<PostRow | null> {
-  return db.prepare(`SELECT p.*, ${TAGS_JSON_SQL} FROM posts p WHERE p.id = ?`).bind(id).first<PostRow>();
+  return db
+    .prepare(`SELECT p.*, m.r2_key AS cover_key, ${TAGS_JSON_SQL} FROM posts p LEFT JOIN media m ON m.id = p.cover_media_id WHERE p.id = ?`)
+    .bind(id)
+    .first<PostRow>();
 }
 
 /** 記事を作成し、作成した記事の id を返す */
-export async function createPost(db: D1Database, input: PostInput & { slug: string }): Promise<number> {
+export async function createPost(db: D1Database, input: PostInput & { slug: string }, publicHost: string): Promise<number> {
   const t = now();
   const excerpt = input.excerpt ?? (await makeExcerpt(input.bodyHtml));
+  const mediaKeys = await extractMediaKeys(input.bodyHtml, publicHost);
+  const ref = { slug: input.slug };
   const results = await db.batch([
     db
       .prepare(
-        `INSERT INTO posts (slug, title, body_html, editor_mode, excerpt, excerpt_auto, status, published_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO posts (slug, title, body_html, editor_mode, excerpt, excerpt_auto, status, published_at, cover_auto, cover_media_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT id FROM media WHERE r2_key = ?), ?, ?)`,
       )
-      .bind(input.slug, input.title, input.bodyHtml, input.editorMode, excerpt, input.excerpt === null ? 1 : 0, input.status, input.publishedAt, t, t),
-    ...setPostTagsStatements(db, { slug: input.slug }, input.tags, t),
+      .bind(
+        input.slug,
+        input.title,
+        input.bodyHtml,
+        input.editorMode,
+        excerpt,
+        input.excerpt === null ? 1 : 0,
+        input.status,
+        input.publishedAt,
+        input.coverKey === null ? 1 : 0,
+        input.coverKey,
+        t,
+        t,
+      ),
+    ...setPostTagsStatements(db, ref, input.tags, t),
+    ...setPostMediaStatements(db, ref, mediaKeys),
+    coverAutoStatement(db, ref),
     bumpContentVersionStatement(db),
   ]);
   return results[0]!.meta.last_row_id;
@@ -207,23 +245,50 @@ export async function createPost(db: D1Database, input: PostInput & { slug: stri
 /**
  * 記事を更新する。expectedUpdatedAt が DB の値と違えば（別の端末で先に保存されていれば）false を返し、何も変更しない。
  */
-export async function updatePost(db: D1Database, id: number, input: PostInput & { slug: string }, expectedUpdatedAt: number): Promise<boolean> {
+export async function updatePost(
+  db: D1Database,
+  id: number,
+  input: PostInput & { slug: string },
+  expectedUpdatedAt: number,
+  publicHost: string,
+): Promise<boolean> {
   const t = now();
   const excerpt = input.excerpt ?? (await makeExcerpt(input.bodyHtml));
-  const results = await db.batch([
-    // タグの変更は、記事の UPDATE と同じ条件（updated_at が一致する）のときだけ行う。
+  const mediaKeys = await extractMediaKeys(input.bodyHtml, publicHost);
+  const guarded = { id, ifUpdatedAt: expectedUpdatedAt };
+  const statements = [
+    // タグと画像の参照関係の変更は、記事の UPDATE と同じ条件（updated_at が一致する）のときだけ行う。
     // batch は 1 つのトランザクションとして順に実行されるので、UPDATE より前に置けば条件の判定がずれない
-    ...setPostTagsStatements(db, { id, ifUpdatedAt: expectedUpdatedAt }, input.tags, t),
+    ...setPostTagsStatements(db, guarded, input.tags, t),
+    ...setPostMediaStatements(db, guarded, mediaKeys),
+  ];
+  const updateIndex = statements.length;
+  statements.push(
     // 同じ秒に 2 回保存しても競合検出が効くよう、updated_at は必ず増やす
     db
       .prepare(
         `UPDATE posts SET slug = ?, title = ?, body_html = ?, editor_mode = ?, excerpt = ?, excerpt_auto = ?, status = ?, published_at = ?,
-           updated_at = MAX(?, updated_at + 1)
+           cover_auto = ?, cover_media_id = (SELECT id FROM media WHERE r2_key = ?), updated_at = MAX(?, updated_at + 1)
          WHERE id = ? AND updated_at = ?`,
       )
-      .bind(input.slug, input.title, input.bodyHtml, input.editorMode, excerpt, input.excerpt === null ? 1 : 0, input.status, input.publishedAt, t, id, expectedUpdatedAt),
+      .bind(
+        input.slug,
+        input.title,
+        input.bodyHtml,
+        input.editorMode,
+        excerpt,
+        input.excerpt === null ? 1 : 0,
+        input.status,
+        input.publishedAt,
+        input.coverKey === null ? 1 : 0,
+        input.coverKey,
+        t,
+        id,
+        expectedUpdatedAt,
+      ),
+    coverAutoStatement(db, { id }),
     bumpContentVersionStatement(db),
-  ]);
-  const update = results[results.length - 2]!;
-  return update.meta.changes === 1;
+  );
+  const results = await db.batch(statements);
+  return results[updateIndex]!.meta.changes === 1;
 }

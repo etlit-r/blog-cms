@@ -2,8 +2,10 @@ import { Hono, type Context } from 'hono';
 import type { AppEnv } from '../env';
 import { currentYear, dateIso, dateLabel } from '../lib/dates';
 import { now } from '../lib/http';
+import { enhanceBodyImages, mediaUrl, srcset, type MediaRow } from '../lib/media';
 import { TAGS_JSON_SQL, parseTags } from '../lib/posts';
 import { cssHash, renderPage, siteCss } from '../lib/render';
+import { serveMedia } from './media';
 import { getSettings, type SiteSettings } from '../lib/settings';
 import { tagKey, tagUrl } from '../lib/tags';
 
@@ -14,6 +16,8 @@ type C = Context<AppEnv>;
 publicApp.all('/admin/*', (c) => notFound(c));
 publicApp.all('/api/*', (c) => notFound(c));
 
+publicApp.get('/media/*', serveMedia);
+
 type ListRow = {
   id: number;
   slug: string;
@@ -21,7 +25,16 @@ type ListRow = {
   excerpt: string | null;
   published_at: number;
   tags_json: string | null;
+  cover_key: string | null;
+  cover_thumb_key: string | null;
+  cover_width: number | null;
+  cover_height: number | null;
+  cover_alt: string | null;
 };
+
+/** カバー画像の列（media を m として結合して使う） */
+const COVER_SQL = `m.r2_key AS cover_key, m.thumb_key AS cover_thumb_key, m.width AS cover_width, m.height AS cover_height, m.alt AS cover_alt`;
+const COVER_JOIN = 'LEFT JOIN media m ON m.id = p.cover_media_id';
 
 type PostPageRow = ListRow & { body_html: string };
 
@@ -32,7 +45,21 @@ function tagsView(json: string | null) {
   return parseTags(json).map((name) => ({ name, url: tagUrl(name) }));
 }
 
-function cardView(row: ListRow, featured: boolean) {
+function coverView(row: ListRow, eager: boolean) {
+  if (!row.cover_key || !row.cover_thumb_key || !row.cover_width || !row.cover_height) return null;
+  const media = { r2_key: row.cover_key, thumb_key: row.cover_thumb_key, width: row.cover_width, height: row.cover_height };
+  return {
+    src: mediaUrl(row.cover_key),
+    srcset: srcset(media),
+    width: row.cover_width,
+    height: row.cover_height,
+    alt: row.cover_alt ?? '',
+    // 画面の最初に見える画像だけすぐ読み込み、ほかは近づいてから読み込む
+    eager,
+  };
+}
+
+function cardView(row: ListRow, featured: boolean, eager: boolean) {
   const tags = tagsView(row.tags_json);
   return {
     title: row.title,
@@ -43,7 +70,7 @@ function cardView(row: ListRow, featured: boolean) {
     tags,
     hasTags: tags.length > 0,
     featured,
-    cover: null, // フェーズ 3 で記事内の写真を入れる
+    cover: coverView(row, eager),
   };
 }
 
@@ -51,7 +78,11 @@ function absoluteUrl(c: C, path: string): string {
   return `${new URL(c.req.url).protocol}//${c.env.PUBLIC_HOST}${path}`;
 }
 
-function baseView(c: C, settings: SiteSettings, page: { title?: string; description?: string; path: string; ogType?: string }) {
+function baseView(
+  c: C,
+  settings: SiteSettings,
+  page: { title?: string; description?: string; path: string; ogType?: string; ogImagePath?: string | null },
+) {
   return {
     site: { title: settings.siteTitle, description: settings.siteDescription, url: absoluteUrl(c, '/') },
     page: {
@@ -59,7 +90,7 @@ function baseView(c: C, settings: SiteSettings, page: { title?: string; descript
       description: page.description ?? settings.siteDescription,
       url: absoluteUrl(c, page.path),
       ogType: page.ogType ?? 'website',
-      ogImage: null, // フェーズ 3 でカバー画像を入れる
+      ogImage: page.ogImagePath ? absoluteUrl(c, page.ogImagePath) : null,
     },
     year: currentYear(),
   };
@@ -103,8 +134,8 @@ async function listPage(c: C, opts: { page: number; basePath: string; tag?: { id
   const [list, count] = await db.batch<ListRow | { n: number }>([
     db
       .prepare(
-        `SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, ${TAGS_JSON_SQL}
-         FROM posts p WHERE ${PUBLISHED} ${tagFilter}
+        `SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, ${COVER_SQL}, ${TAGS_JSON_SQL}
+         FROM posts p ${COVER_JOIN} WHERE ${PUBLISHED} ${tagFilter}
          ORDER BY p.published_at DESC, p.id DESC LIMIT ? OFFSET ?`,
       )
       .bind(t, ...tagArgs, perPage, (opts.page - 1) * perPage),
@@ -117,11 +148,14 @@ async function listPage(c: C, opts: { page: number; basePath: string; tag?: { id
   if (opts.page > totalPages) return notFound(c);
 
   const isTop = !opts.tag && opts.page === 1;
-  const posts = rows.map((row, i) => cardView(row, isTop && i === 0));
+  const posts = rows.map((row, i) => cardView(row, isTop && i === 0, i === 0));
+  // SNS で共有されたときの画像には、一覧の中で最初に見つかったカバーを使う
+  const firstCover = rows.find((r) => r.cover_key)?.cover_key;
   const view = {
     ...baseView(c, settings, {
       title: opts.tag ? `#${opts.tag.name}` : opts.page > 1 ? `${opts.page}ページ目` : undefined,
       path: c.req.path,
+      ogImagePath: firstCover ? mediaUrl(firstCover) : null,
     }),
     posts,
     pager: pagerView(opts.basePath, opts.page, totalPages),
@@ -183,7 +217,10 @@ publicApp.get('/posts/:slug', async (c) => {
   const db = c.env.DB;
   const t = now();
   const post = await db
-    .prepare(`SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, p.body_html, ${TAGS_JSON_SQL} FROM posts p WHERE p.slug = ? AND ${PUBLISHED}`)
+    .prepare(
+      `SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, p.body_html, ${COVER_SQL}, ${TAGS_JSON_SQL}
+       FROM posts p ${COVER_JOIN} WHERE p.slug = ? AND ${PUBLISHED}`,
+    )
     .bind(c.req.param('slug'), t)
     .first<PostPageRow>();
   if (!post) return notFound(c);
@@ -195,16 +232,27 @@ publicApp.get('/posts/:slug', async (c) => {
          ORDER BY p.published_at ${order}, p.id ${order} LIMIT 1`,
       )
       .bind(t, post.published_at, post.id);
-  const [newer, older] = await db.batch<{ slug: string; title: string }>([neighbor('>', 'ASC'), neighbor('<', 'DESC')]);
-  const link = (r: { slug: string; title: string } | undefined) => (r ? { url: `/posts/${r.slug}`, title: r.title } : null);
+  const [newer, older, images] = await db.batch<{ slug: string; title: string } | MediaRow>([
+    neighbor('>', 'ASC'),
+    neighbor('<', 'DESC'),
+    db.prepare('SELECT m.* FROM post_media pm JOIN media m ON m.id = pm.media_id WHERE pm.post_id = ?').bind(post.id),
+  ]);
+  const mediaByKey = new Map((images!.results as MediaRow[]).map((m) => [m.r2_key, m]));
+  const link = (r: unknown) => {
+    const row = r as { slug: string; title: string } | undefined;
+    return row ? { url: `/posts/${row.slug}`, title: row.title } : null;
+  };
 
   const settings = await getSettings(db);
   const tags = tagsView(post.tags_json);
   const view = {
-    ...baseView(c, settings, { title: post.title, description: post.excerpt || undefined, path: `/posts/${post.slug}`, ogType: 'article' }),
+    ...baseView(c, settings, { title: post.title, description: post.excerpt || undefined, path: `/posts/${post.slug}`, ogType: 'article',
+      ogImagePath: post.cover_key ? mediaUrl(post.cover_key) : null,
+    }),
     post: {
       title: post.title,
-      bodyHtml: post.body_html,
+      bodyHtml: await enhanceBodyImages(post.body_html, mediaByKey, c.env.PUBLIC_HOST),
+      cover: coverView(post, true),
       dateLabel: dateLabel(post.published_at),
       dateIso: dateIso(post.published_at),
       tags,

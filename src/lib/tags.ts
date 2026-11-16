@@ -1,3 +1,5 @@
+import { guardSql, postIdSql, type PostRef } from './postref';
+
 export const TAG_NAME_MAX = 50;
 export const TAGS_PER_POST_MAX = 20;
 
@@ -39,34 +41,25 @@ export function normalizeTagNames(names: unknown): { names: string[] } | { error
   return { names: result };
 }
 
-/** 記事の指定方法。id、または作成と同じ batch の中では slug で指す */
-export type PostRef =
-  | { id: number; /** 指定すると、記事の updated_at がこの値のときだけ変更する（競合検出用） */ ifUpdatedAt?: number }
-  | { slug: string };
-
 /**
  * 記事のタグを names に置き換える D1 ステートメントを返す。
  * 未登録のタグはここで作成する（同じキーのタグがあればそれを使う）。
- * ifUpdatedAt を指定する場合は、記事を UPDATE するステートメントより「前」に batch に入れること。
  */
 export function setPostTagsStatements(db: D1Database, post: PostRef, names: string[], now: number): D1PreparedStatement[] {
-  const [postIdSql, postIdArgs] = 'slug' in post ? ['(SELECT id FROM posts WHERE slug = ?)', [post.slug]] : ['?', [post.id]];
-  const [guardSql, guardArgs] =
-    'id' in post && post.ifUpdatedAt !== undefined
-      ? ['EXISTS (SELECT 1 FROM posts WHERE id = ? AND updated_at = ?)', [post.id, post.ifUpdatedAt]]
-      : ['1', []];
+  const [idSql, idArgs] = postIdSql(post);
+  const [guard, guardArgs] = guardSql(post);
 
   return [
     ...names.map((name) =>
       db
-        .prepare(`INSERT INTO tags (name, name_key, created_at) SELECT ?, ?, ? WHERE ${guardSql} ON CONFLICT(name_key) DO NOTHING`)
+        .prepare(`INSERT INTO tags (name, name_key, created_at) SELECT ?, ?, ? WHERE ${guard} ON CONFLICT(name_key) DO NOTHING`)
         .bind(name, tagKey(name), now, ...guardArgs),
     ),
-    db.prepare(`DELETE FROM post_tags WHERE post_id = ${postIdSql} AND ${guardSql}`).bind(...postIdArgs, ...guardArgs),
+    db.prepare(`DELETE FROM post_tags WHERE post_id = ${idSql} AND ${guard}`).bind(...idArgs, ...guardArgs),
     ...names.map((name) =>
       db
-        .prepare(`INSERT OR IGNORE INTO post_tags (post_id, tag_id) SELECT ${postIdSql}, id FROM tags WHERE name_key = ? AND ${guardSql}`)
-        .bind(...postIdArgs, tagKey(name), ...guardArgs),
+        .prepare(`INSERT OR IGNORE INTO post_tags (post_id, tag_id) SELECT ${idSql}, id FROM tags WHERE name_key = ? AND ${guard}`)
+        .bind(...idArgs, tagKey(name), ...guardArgs),
     ),
   ];
 }

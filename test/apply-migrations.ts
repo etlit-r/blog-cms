@@ -11,3 +11,11 @@ declare global {
 }
 
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+
+declare global {
+  namespace Cloudflare {
+    interface Env {
+      MEDIA: R2Bucket;
+    }
+  }
+}
