@@ -58,6 +58,48 @@ npm run deploy
 
 2 回目以降は `npm run deploy` だけで更新できます。
 
+## GitHub Actions でのデプロイ
+
+`.github/workflows/ci.yml` が次のように動きます。
+
+- **プルリクエスト**: 型チェック・テスト・ビルドを実行する（デプロイはしない）
+- **`main` への push（プルリクエストのマージを含む）**: 上記がすべて通ったら、本番 D1 へのマイグレーションと Worker のデプロイを行う
+- **手動実行**: GitHub の Actions タブ → 「CI / Deploy」→「Run workflow」で `main` を選ぶと、デプロイまで行う
+
+以下の初回準備は、すべて Cloudflare と GitHub の画面だけでできます（PC で `wrangler` を使う必要はありません）。
+
+### 1. Cloudflare 側の準備
+
+1. **D1 データベースを作る**: ダッシュボードの「Storage & Databases」→「D1 SQL Database」→「Create」で、名前を `blog-cms` にして作成します。
+   作成後に表示される **Database ID** を、`wrangler.jsonc` の `database_id`（初期値 `00000000-0000-0000-0000-000000000000`）と置き換えてコミットします。
+   この ID は秘密情報ではないので、リポジトリに含めて構いません。初期値のままだとデプロイは失敗するようにしてあります。
+2. **R2 バケットを作る**: 「R2 Object Storage」→「Create bucket」で、名前を `blog-cms-media` にして作成します。
+3. **API トークンを作る**: 右上のアイコン →「Profile」→「API Tokens」→「Create Token」で、テンプレート「**Edit Cloudflare Workers**」を選びます。
+   - 「Permissions」に **Account / D1 / Edit** を追加します（マイグレーションに必要）。
+   - 「Account Resources」は自分のアカウント、「Zone Resources」は `etlits.dev` を選びます。
+   - 作成後に表示されるトークンは一度しか表示されないので控えておきます。
+4. **アカウント ID を確認する**: 「Workers & Pages」の画面右側などに表示される **Account ID** を控えます。
+
+### 2. GitHub 側の準備
+
+リポジトリの「Settings」→「Secrets and variables」→「Actions」→「New repository secret」で、次の 2 つを登録します。
+
+| 名前 | 値 |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | 手順 1-3 で作った API トークン |
+| `CLOUDFLARE_ACCOUNT_ID` | 手順 1-4 で控えた Account ID |
+
+### 3. 初回デプロイとセットアップトークン
+
+1. `database_id` を書き換えた変更を `main` に入れると、デプロイが始まります（Actions タブで進み具合を確認できます）。
+2. デプロイが成功したら、Cloudflare のダッシュボードで「Workers & Pages」→「blog-cms」→「Settings」→「Variables and Secrets」→「Add」を開き、
+   種類を **Secret**、名前を `SETUP_TOKEN`、値を推測されにくい長い文字列にして保存します。
+   一度設定すれば、以降のデプロイでも消えません。
+   設定するまでの間は、管理画面のセットアップは受け付けられない（エラーになる）ので、第三者に先にアカウントを作られることはありません。
+3. `https://admin.etlits.dev` を開き、設定したトークンを入力してアカウントを作成します。
+
+以降は `main` にマージするたびに自動でデプロイされます。
+
 ## パスワードを忘れたとき
 
 アカウントを削除してから、もう一度セットアップします（記事などのデータは消えません）。

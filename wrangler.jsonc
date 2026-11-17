@@ -32,8 +32,7 @@
     {
       "binding": "DB",
       "database_name": "blog-cms",
-      // `npx wrangler d1 create blog-cms` で表示された ID に置き換える
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "46862722-f2da-4666-a973-d276651580be",
       "migrations_dir": "migrations"
     }
   ],
