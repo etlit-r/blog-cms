@@ -17,6 +17,8 @@ export type Post = PostSummary & {
   editorMode: 'rich' | 'html';
   excerpt: string;
   excerptAuto: boolean;
+  coverAuto: boolean;
+  coverUrl: string | null;
 };
 
 export type Tag = { id: number; name: string; postCount: number };
@@ -26,4 +28,19 @@ export type SiteSettings = {
   siteDescription: string;
   postsPerPage: number;
   publicUrl: string;
+};
+
+export type Media = {
+  id: number;
+  url: string;
+  thumbUrl: string;
+  mime: string;
+  width: number;
+  height: number;
+  thumbWidth: number;
+  thumbHeight: number;
+  bytes: number;
+  alt: string;
+  createdAt: number;
+  usageCount?: number;
 };

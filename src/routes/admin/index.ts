@@ -2,7 +2,9 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../../env';
 import { isValidSession } from '../../lib/auth';
 import { apiError } from '../../lib/http';
+import { serveMedia } from '../media';
 import { auth, getSessionToken } from './auth';
+import { media } from './media';
 import { posts } from './posts';
 import { settings } from './settings';
 import { tags } from './tags';
@@ -59,8 +61,12 @@ adminApp.route('/api/admin/auth', auth);
 adminApp.route('/api/admin/posts', posts);
 adminApp.route('/api/admin/tags', tags);
 adminApp.route('/api/admin/settings', settings);
+adminApp.route('/api/admin/media', media);
 
 adminApp.all('/api/*', (c) => apiError(c, 404, 'not_found', 'API が見つかりません'));
+
+// エディタの中で本文の画像（/media/...）を表示するため、管理ホストからも画像を返す
+adminApp.get('/media/*', serveMedia);
 
 // ---------- 管理画面 SPA ----------
 

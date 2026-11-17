@@ -66,9 +66,12 @@ posts.post('/', async (c) => {
   const db = c.env.DB;
   const body = await readJson(c);
   if (!body) return apiError(c, 400, 'invalid_body', 'リクエストの形式が正しくありません');
-  const parsed = parsePostInput(body);
+  const parsed = parsePostInput(body, c.env.PUBLIC_HOST);
   if ('error' in parsed) return apiError(c, 400, 'invalid_input', parsed.error);
   const input = parsed.value;
+  if (input.coverKey && !(await mediaExists(db, input.coverKey))) {
+    return apiError(c, 400, 'invalid_input', 'カバーに指定した画像が見つかりません');
+  }
 
   let slug: string;
   if (input.slug) {
@@ -80,7 +83,7 @@ posts.post('/', async (c) => {
 
   let id: number;
   try {
-    id = await createPost(db, { ...input, slug });
+    id = await createPost(db, { ...input, slug }, c.env.PUBLIC_HOST);
   } catch (e) {
     // 確認してから保存するまでの間に、同じ URL の記事が作られた場合
     if (await slugExists(db, slug)) return slugTaken(c);
@@ -97,9 +100,12 @@ posts.put('/:id', async (c) => {
   const body = await readJson(c);
   if (!body) return apiError(c, 400, 'invalid_body', 'リクエストの形式が正しくありません');
   if (typeof body.updatedAt !== 'number') return apiError(c, 400, 'invalid_input', 'updatedAt を指定してください');
-  const parsed = parsePostInput(body);
+  const parsed = parsePostInput(body, c.env.PUBLIC_HOST);
   if ('error' in parsed) return apiError(c, 400, 'invalid_input', parsed.error);
   const input = parsed.value;
+  if (input.coverKey && !(await mediaExists(db, input.coverKey))) {
+    return apiError(c, 400, 'invalid_input', 'カバーに指定した画像が見つかりません');
+  }
 
   const current = await getPost(db, id);
   if (!current) return apiError(c, 404, 'not_found', '記事が見つかりません');
@@ -114,7 +120,7 @@ posts.put('/:id', async (c) => {
 
   let updated: boolean;
   try {
-    updated = await updatePost(db, id, { ...input, slug }, body.updatedAt);
+    updated = await updatePost(db, id, { ...input, slug }, body.updatedAt, c.env.PUBLIC_HOST);
   } catch (e) {
     if (await slugExists(db, slug, id)) return slugTaken(c);
     throw e;
@@ -136,4 +142,8 @@ posts.delete('/:id', async (c) => {
 
 function slugTaken(c: Parameters<typeof apiError>[0]) {
   return apiError(c, 409, 'slug_taken', 'この URL はほかの記事で使われています');
+}
+
+async function mediaExists(db: D1Database, key: string): Promise<boolean> {
+  return (await db.prepare('SELECT 1 FROM media WHERE r2_key = ?').bind(key).first()) !== null;
 }

@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useBlocker, useNavigate, useParams } from 'react-router';
+import { CoverPicker } from '../components/CoverPicker';
 import { Field } from '../components/Field';
+import { ImagePickButton } from '../components/ImagePickButton';
+import { MediaPicker } from '../components/MediaPicker';
 import { TagInput } from '../components/TagInput';
+import { UploadProgress } from '../components/UploadProgress';
 import { ApiError, api } from '../lib/api';
 import { STATE_LABELS, fromLocalInput, toLocalInput } from '../lib/format';
-import type { Post } from '../lib/types';
+import { imageHtml } from '../lib/media';
+import type { Media, Post } from '../lib/types';
 import { useSettings } from '../lib/useSettings';
+import { useUploadQueue } from '../lib/useUploadQueue';
 
 /** 編集中の内容（保存済みの内容と比べて、未保存かどうかを判定する） */
 type Form = {
@@ -16,9 +22,10 @@ type Form = {
   excerpt: string; // 空なら本文から自動生成
   status: 'draft' | 'published';
   publishedAt: number | null;
+  coverImage: string | null; // 手動で選んだカバー（/media/...）。null なら本文の先頭の画像
 };
 
-const EMPTY: Form = { title: '', bodyHtml: '', tags: [], slug: '', excerpt: '', status: 'draft', publishedAt: null };
+const EMPTY: Form = { title: '', bodyHtml: '', tags: [], slug: '', excerpt: '', status: 'draft', publishedAt: null, coverImage: null };
 
 function formOf(post: Post): Form {
   return {
@@ -29,6 +36,7 @@ function formOf(post: Post): Form {
     excerpt: post.excerptAuto ? '' : post.excerpt,
     status: post.status,
     publishedAt: post.publishedAt,
+    coverImage: post.coverAuto ? null : post.coverUrl,
   };
 }
 
@@ -46,6 +54,10 @@ export function PostEdit() {
   const [showSettings, setShowSettings] = useState(isNew);
   /** 保存・削除の直後の画面移動では、未保存の確認を出さない */
   const leaving = useRef(false);
+  const uploads = useUploadQueue();
+  const [showLibrary, setShowLibrary] = useState(false);
+  /** 本文の入力欄で最後にカーソルがあった位置（ボタンを押すとフォーカスが外れるので覚えておく） */
+  const selection = useRef<{ start: number; end: number } | null>(null);
 
   useEffect(() => {
     // posts/new → posts/:id の移動では同じ画面が使い回されるので、ここで戻す
@@ -83,6 +95,38 @@ export function PostEdit() {
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
 
+  function rememberSelection(el: HTMLTextAreaElement) {
+    selection.current = { start: el.selectionStart, end: el.selectionEnd };
+  }
+
+  /** 画像のタグを、本文のカーソルの位置（なければ末尾）に挿入する */
+  function insertImages(media: Media[]) {
+    if (media.length === 0) return;
+    const snippet = media.map(imageHtml).join('\n');
+    const sel = selection.current;
+    // 更新関数の中では ref を書き換えない（StrictMode では 2 回呼ばれるため）
+    setForm((f) => {
+      const { start, end } = sel ?? { start: f.bodyHtml.length, end: f.bodyHtml.length };
+      const text = `${start > 0 ? '\n' : ''}${snippet}\n`;
+      return { ...f, bodyHtml: f.bodyHtml.slice(0, start) + text + f.bodyHtml.slice(end) };
+    });
+    // 続けて挿入したときは、今入れた画像の後ろに入るようにする
+    if (sel) {
+      const next = sel.start + (sel.start > 0 ? 1 : 0) + snippet.length + 1;
+      selection.current = { start: next, end: next };
+    }
+  }
+
+  async function uploadAndInsert(files: File[]) {
+    // アップロード中に入力が進むこともあるので、挿入位置は終わった時点のカーソル位置にする
+    insertImages(await uploads.upload(files));
+  }
+
+  /** 本文の入力欄に画像を貼り付け・ドロップしたらアップロードする */
+  function imageFilesOf(data: DataTransfer | null): File[] {
+    return Array.from(data?.files ?? []).filter((f) => f.type.startsWith('image/'));
+  }
+
   async function save(nextStatus: Form['status'] = form.status) {
     setSaving(true);
     setMessage(null);
@@ -95,6 +139,7 @@ export function PostEdit() {
       excerpt: form.excerpt || null,
       status: nextStatus,
       publishedAt: form.publishedAt,
+      coverImage: form.coverImage,
     };
     try {
       const res = isNew
@@ -173,6 +218,16 @@ export function PostEdit() {
 
         <input className="title-input" placeholder="タイトル" aria-label="タイトル" value={form.title} onChange={(e) => set('title', e.target.value)} />
 
+        <div className="editor-toolbar">
+          <ImagePickButton className="btn small" onPick={(files) => void uploadAndInsert(files)}>
+            画像を追加
+          </ImagePickButton>
+          <button type="button" className="btn small" onClick={() => setShowLibrary(true)}>
+            ライブラリから
+          </button>
+        </div>
+        <UploadProgress items={uploads.items} onDismiss={uploads.dismiss} />
+
         <textarea
           className="body-input"
           placeholder="本文（HTML）"
@@ -180,9 +235,28 @@ export function PostEdit() {
           spellCheck={false}
           autoCapitalize="none"
           value={form.bodyHtml}
-          onChange={(e) => set('bodyHtml', e.target.value)}
+          onChange={(e) => {
+            set('bodyHtml', e.target.value);
+            rememberSelection(e.target);
+          }}
+          onSelect={(e) => rememberSelection(e.currentTarget)}
+          onPaste={(e) => {
+            const files = imageFilesOf(e.clipboardData);
+            if (files.length === 0) return;
+            e.preventDefault();
+            rememberSelection(e.currentTarget);
+            void uploadAndInsert(files);
+          }}
+          onDragOver={(e) => imageFilesOf(e.dataTransfer).length > 0 && e.preventDefault()}
+          onDrop={(e) => {
+            const files = imageFilesOf(e.dataTransfer);
+            if (files.length === 0) return;
+            e.preventDefault();
+            rememberSelection(e.currentTarget);
+            void uploadAndInsert(files);
+          }}
         />
-        <p className="hint">今は HTML で書きます。リッチテキストでの編集と画像の挿入は、この後の開発段階で追加します。</p>
+        <p className="hint">今は HTML で書きます。リッチテキストでの編集は、この後の開発段階で追加します。画像は貼り付けやドロップでも追加できます。</p>
 
         <section className="card">
           <button type="button" className="disclosure" aria-expanded={showSettings} onClick={() => setShowSettings((v) => !v)}>
@@ -191,6 +265,8 @@ export function PostEdit() {
           </button>
           {showSettings && (
             <div className="stack" style={{ marginTop: 16 }}>
+              <CoverPicker bodyHtml={form.bodyHtml} value={form.coverImage} onChange={(v) => set('coverImage', v)} />
+
               <TagInput value={form.tags} onChange={(tags) => set('tags', tags)} />
 
               <div className="field">
@@ -248,6 +324,16 @@ export function PostEdit() {
           )}
         </section>
       </main>
+
+      {showLibrary && (
+        <MediaPicker
+          onClose={() => setShowLibrary(false)}
+          onInsert={(media) => {
+            insertImages(media);
+            setShowLibrary(false);
+          }}
+        />
+      )}
     </div>
   );
 }
