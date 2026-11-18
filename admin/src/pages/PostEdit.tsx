@@ -1,22 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useBlocker, useNavigate, useParams } from 'react-router';
 import { CoverPicker } from '../components/CoverPicker';
+import { BodyEditor } from '../components/editor/BodyEditor';
+import type { EditorMode } from '../components/editor/types';
 import { Field } from '../components/Field';
-import { ImagePickButton } from '../components/ImagePickButton';
-import { MediaPicker } from '../components/MediaPicker';
 import { TagInput } from '../components/TagInput';
-import { UploadProgress } from '../components/UploadProgress';
 import { ApiError, api } from '../lib/api';
-import { STATE_LABELS, fromLocalInput, toLocalInput } from '../lib/format';
-import { imageHtml } from '../lib/media';
-import type { Media, Post } from '../lib/types';
+import { clearDraft, draftKey, loadDraft, saveDraft, type LocalDraft } from '../lib/autosave';
+import { STATE_LABELS, formatDateTime, fromLocalInput, toLocalInput } from '../lib/format';
+import type { Post } from '../lib/types';
 import { useSettings } from '../lib/useSettings';
-import { useUploadQueue } from '../lib/useUploadQueue';
+
+/** 入力が止まってから端末に自動保存するまでの時間 */
+const AUTOSAVE_DELAY_MS = 3000;
 
 /** 編集中の内容（保存済みの内容と比べて、未保存かどうかを判定する） */
 type Form = {
   title: string;
   bodyHtml: string;
+  editorMode: EditorMode;
   tags: string[];
   slug: string;
   excerpt: string; // 空なら本文から自動生成
@@ -25,12 +27,29 @@ type Form = {
   coverImage: string | null; // 手動で選んだカバー（/media/...）。null なら本文の先頭の画像
 };
 
-const EMPTY: Form = { title: '', bodyHtml: '', tags: [], slug: '', excerpt: '', status: 'draft', publishedAt: null, coverImage: null };
+const EMPTY: Form = { title: '', bodyHtml: '', editorMode: 'rich', tags: [], slug: '', excerpt: '', status: 'draft', publishedAt: null, coverImage: null };
+
+/** 2 つのフォームの内容が同じか（本文が長くても、入力のたびに全体を文字列にしないで比べる） */
+function sameForm(a: Form, b: Form): boolean {
+  return (
+    a.bodyHtml === b.bodyHtml &&
+    a.title === b.title &&
+    a.editorMode === b.editorMode &&
+    a.slug === b.slug &&
+    a.excerpt === b.excerpt &&
+    a.status === b.status &&
+    a.publishedAt === b.publishedAt &&
+    a.coverImage === b.coverImage &&
+    a.tags.length === b.tags.length &&
+    a.tags.every((t, i) => t === b.tags[i])
+  );
+}
 
 function formOf(post: Post): Form {
   return {
     title: post.title,
     bodyHtml: post.bodyHtml,
+    editorMode: post.editorMode,
     tags: post.tags,
     slug: post.slug,
     excerpt: post.excerptAuto ? '' : post.excerpt,
@@ -54,21 +73,37 @@ export function PostEdit() {
   const [showSettings, setShowSettings] = useState(isNew);
   /** 保存・削除の直後の画面移動では、未保存の確認を出さない */
   const leaving = useRef(false);
-  const uploads = useUploadQueue();
-  const [showLibrary, setShowLibrary] = useState(false);
-  /** 本文の入力欄で最後にカーソルがあった位置（ボタンを押すとフォーカスが外れるので覚えておく） */
-  const selection = useRef<{ start: number; end: number } | null>(null);
+  /** 端末に自動保存された、まだサーバーに保存していない内容（復元するか確認する） */
+  const [pendingDraft, setPendingDraft] = useState<LocalDraft<Form> | null>(null);
+  /** 復元するか確認している間は、自動保存で上書きしない */
+  const [draftChecked, setDraftChecked] = useState(false);
+  const key = draftKey(id);
+  /** 新しい記事を作った直後、保存中に打った内容を、移動先の画面に引き継ぐ */
+  const carryOver = useRef<Form | null>(null);
 
   useEffect(() => {
     // posts/new → posts/:id の移動では同じ画面が使い回されるので、ここで戻す
     leaving.current = false;
-    if (isNew) return;
+    setDraftChecked(false);
+    setPendingDraft(null);
+    // 端末に残っている下書きが、サーバーの内容と違えば復元するか確認する
+    const checkDraft = (server: Form) => {
+      const draft = loadDraft<Form>(draftKey(id));
+      if (draft && !sameForm({ ...EMPTY, ...draft.form }, server)) setPendingDraft(draft);
+      else setDraftChecked(true);
+    };
+    if (isNew) {
+      checkDraft(EMPTY);
+      return;
+    }
     let cancelled = false;
     api<{ post: Post }>(`/posts/${id}`)
       .then(({ post }) => {
         if (cancelled) return;
         setPost(post);
-        setForm(formOf(post));
+        setForm(carryOver.current ?? formOf(post));
+        carryOver.current = null;
+        checkDraft(formOf(post));
       })
       .catch((e: Error) => !cancelled && setLoadError(e.message));
     return () => {
@@ -77,7 +112,7 @@ export function PostEdit() {
   }, [id, isNew]);
 
   const saved = useMemo(() => (post ? formOf(post) : EMPTY), [post]);
-  const dirty = JSON.stringify(form) !== JSON.stringify(saved);
+  const dirty = !sameForm(form, saved);
 
   // 未保存のまま画面を離れようとしたら確認する（アプリ内の移動とタブを閉じる操作の両方）
   const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
@@ -93,47 +128,58 @@ export function PostEdit() {
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [dirty]);
 
-  const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
-
-  function rememberSelection(el: HTMLTextAreaElement) {
-    selection.current = { start: el.selectionStart, end: el.selectionEnd };
-  }
-
-  /** 画像のタグを、本文のカーソルの位置（なければ末尾）に挿入する */
-  function insertImages(media: Media[]) {
-    if (media.length === 0) return;
-    const snippet = media.map(imageHtml).join('\n');
-    const sel = selection.current;
-    // 更新関数の中では ref を書き換えない（StrictMode では 2 回呼ばれるため）
-    setForm((f) => {
-      const { start, end } = sel ?? { start: f.bodyHtml.length, end: f.bodyHtml.length };
-      const text = `${start > 0 ? '\n' : ''}${snippet}\n`;
-      return { ...f, bodyHtml: f.bodyHtml.slice(0, start) + text + f.bodyHtml.slice(end) };
-    });
-    // 続けて挿入したときは、今入れた画像の後ろに入るようにする
-    if (sel) {
-      const next = sel.start + (sel.start > 0 ? 1 : 0) + snippet.length + 1;
-      selection.current = { start: next, end: next };
+  // 入力が止まって 3 秒たったら、端末に自動保存する。サーバーと同じ内容に戻ったら消す
+  useEffect(() => {
+    if (!draftChecked) return;
+    if (!dirty) {
+      clearDraft(key);
+      return;
     }
+    const timer = setTimeout(() => saveDraft<Form>(key, { form, savedAt: Date.now(), baseUpdatedAt: post?.updatedAt ?? null }), AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [form, dirty, draftChecked, key, post?.updatedAt]);
+
+  /** 待ち時間を置かずに、今の内容を端末に保存する（画面を閉じる・再読み込みする直前など） */
+  const latest = useRef({ form, dirty, draftChecked, key, baseUpdatedAt: post?.updatedAt ?? null });
+  latest.current = { form, dirty, draftChecked, key, baseUpdatedAt: post?.updatedAt ?? null };
+  const flushDraft = useCallback(() => {
+    const l = latest.current;
+    if (l.draftChecked && l.dirty) saveDraft<Form>(l.key, { form: l.form, savedAt: Date.now(), baseUpdatedAt: l.baseUpdatedAt });
+  }, []);
+  useEffect(() => {
+    // スマホでは、アプリの切り替えやタブを閉じるときに visibilitychange / pagehide が来る
+    const onHide = () => document.visibilityState === 'hidden' && flushDraft();
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', flushDraft);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', flushDraft);
+    };
+  }, [flushDraft]);
+
+  function restoreDraft() {
+    if (!pendingDraft) return;
+    setForm({ ...EMPTY, ...pendingDraft.form });
+    setPendingDraft(null);
+    setDraftChecked(true);
   }
 
-  async function uploadAndInsert(files: File[]) {
-    // アップロード中に入力が進むこともあるので、挿入位置は終わった時点のカーソル位置にする
-    insertImages(await uploads.upload(files));
+  function discardDraft() {
+    clearDraft(key);
+    setPendingDraft(null);
+    setDraftChecked(true);
   }
 
-  /** 本文の入力欄に画像を貼り付け・ドロップしたらアップロードする */
-  function imageFilesOf(data: DataTransfer | null): File[] {
-    return Array.from(data?.files ?? []).filter((f) => f.type.startsWith('image/'));
-  }
+  const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   async function save(nextStatus: Form['status'] = form.status) {
     setSaving(true);
     setMessage(null);
+    const sent = form;
     const body = {
       title: form.title,
       bodyHtml: form.bodyHtml,
-      editorMode: 'html', // リッチテキストエディタはフェーズ 4 で追加する
+      editorMode: form.editorMode,
       tags: form.tags,
       slug: form.slug || null,
       excerpt: form.excerpt || null,
@@ -146,14 +192,21 @@ export function PostEdit() {
         ? await api<{ post: Post }>('/posts', { method: 'POST', body })
         : await api<{ post: Post }>(`/posts/${id}`, { method: 'PUT', body: { ...body, updatedAt: post!.updatedAt } });
       setPost(res.post);
-      setForm(formOf(res.post));
+      // 保存の通信中に入力された内容は消さずに残す（未保存として扱われる）
+      const editedWhileSaving = !sameForm(latest.current.form, sent);
+      setForm((f) => (sameForm(f, sent) ? formOf(res.post) : f));
+      if (!editedWhileSaving) clearDraft(key);
       setMessage({ type: 'success', text: nextStatus === 'published' && res.post.state === 'published' ? '公開しました' : '保存しました' });
       if (isNew) {
+        clearDraft(key);
+        if (editedWhileSaving) carryOver.current = latest.current.form;
         leaving.current = true;
         navigate(`/posts/${res.post.id}`, { replace: true });
       }
     } catch (e) {
       const conflict = e instanceof ApiError && e.code === 'conflict';
+      // 競合したら再読み込みしてもらうので、その前に今の内容を端末に残す
+      if (conflict) flushDraft();
       setMessage({ type: 'error', text: e instanceof Error ? e.message : String(e), conflict });
     } finally {
       setSaving(false);
@@ -164,6 +217,7 @@ export function PostEdit() {
     if (!post || !window.confirm(`「${post.title || '（無題）'}」を削除しますか？元に戻せません。`)) return;
     try {
       await api(`/posts/${post.id}`, { method: 'DELETE' });
+      clearDraft(key);
       leaving.current = true;
       navigate('/', { replace: true });
     } catch (e) {
@@ -218,45 +272,25 @@ export function PostEdit() {
 
         <input className="title-input" placeholder="タイトル" aria-label="タイトル" value={form.title} onChange={(e) => set('title', e.target.value)} />
 
-        <div className="editor-toolbar">
-          <ImagePickButton className="btn small" onPick={(files) => void uploadAndInsert(files)}>
-            画像を追加
-          </ImagePickButton>
-          <button type="button" className="btn small" onClick={() => setShowLibrary(true)}>
-            ライブラリから
-          </button>
-        </div>
-        <UploadProgress items={uploads.items} onDismiss={uploads.dismiss} />
+        {pendingDraft && (
+          <div className="notice" role="status">
+            <p>
+              保存していない内容が、この端末に残っています（{formatDateTime(Math.floor(pendingDraft.savedAt / 1000))} に自動保存）。
+              {post && pendingDraft.baseUpdatedAt !== post.updatedAt && ' この内容の後に、別の画面で記事が保存されています。'}
+            </p>
+            <div className="row">
+              <button type="button" className="btn small primary-inline" onClick={restoreDraft}>
+                復元する
+              </button>
+              <button type="button" className="btn small" onClick={discardDraft}>
+                破棄する
+              </button>
+            </div>
+          </div>
+        )}
 
-        <textarea
-          className="body-input"
-          placeholder="本文（HTML）"
-          aria-label="本文（HTML）"
-          spellCheck={false}
-          autoCapitalize="none"
-          value={form.bodyHtml}
-          onChange={(e) => {
-            set('bodyHtml', e.target.value);
-            rememberSelection(e.target);
-          }}
-          onSelect={(e) => rememberSelection(e.currentTarget)}
-          onPaste={(e) => {
-            const files = imageFilesOf(e.clipboardData);
-            if (files.length === 0) return;
-            e.preventDefault();
-            rememberSelection(e.currentTarget);
-            void uploadAndInsert(files);
-          }}
-          onDragOver={(e) => imageFilesOf(e.dataTransfer).length > 0 && e.preventDefault()}
-          onDrop={(e) => {
-            const files = imageFilesOf(e.dataTransfer);
-            if (files.length === 0) return;
-            e.preventDefault();
-            rememberSelection(e.currentTarget);
-            void uploadAndInsert(files);
-          }}
-        />
-        <p className="hint">今は HTML で書きます。リッチテキストでの編集は、この後の開発段階で追加します。画像は貼り付けやドロップでも追加できます。</p>
+        <BodyEditor value={form.bodyHtml} mode={form.editorMode} onChange={(html) => set('bodyHtml', html)} onModeChange={(m) => set('editorMode', m)} />
+        <p className="hint">書いた内容はこの端末にも自動で保存されます。公開サイトに反映するには「保存」を押してください。</p>
 
         <section className="card">
           <button type="button" className="disclosure" aria-expanded={showSettings} onClick={() => setShowSettings((v) => !v)}>
@@ -325,15 +359,6 @@ export function PostEdit() {
         </section>
       </main>
 
-      {showLibrary && (
-        <MediaPicker
-          onClose={() => setShowLibrary(false)}
-          onInsert={(media) => {
-            insertImages(media);
-            setShowLibrary(false);
-          }}
-        />
-      )}
     </div>
   );
 }
