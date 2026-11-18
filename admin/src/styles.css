@@ -491,19 +491,6 @@ h2 {
   border-bottom-color: var(--accent);
 }
 
-.body-input {
-  width: 100%;
-  min-height: 55dvh;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 16px;
-  line-height: 1.6;
-  resize: vertical;
-}
 
 .disclosure {
   display: flex;
@@ -620,11 +607,6 @@ h2 {
 
 /* ---------- 画像 ---------- */
 
-.editor-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 
 .upload-list {
   display: flex;
@@ -879,4 +861,203 @@ h2 {
   bottom: -16px;
   margin: 16px -16px -16px;
   background: var(--surface);
+}
+
+/* ---------- 本文エディタ ---------- */
+
+.body-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode-switch {
+  align-self: flex-start;
+}
+
+.mode-switch button {
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.editor-toolbar {
+  position: sticky;
+  top: calc(env(safe-area-inset-top) + 57px); /* 編集画面のヘッダーの下 */
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  scrollbar-width: none;
+}
+
+.editor-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* スマホで入力中は、キーボードのすぐ上に固定する（bottom は JS でキーボードの高さを入れる） */
+.editor-toolbar.floating {
+  position: fixed;
+  top: auto;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  border-width: 1px 0 0;
+  border-radius: 0;
+  padding: 4px 8px;
+  box-shadow: 0 -2px 8px rgb(0 0 0 / 0.08);
+}
+
+.toolbar-spacer {
+  height: 56px;
+}
+
+.tool {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tool[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.tool:disabled {
+  opacity: 0.35;
+}
+
+.tool-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tool-sep {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.editor-loading {
+  min-height: 55dvh;
+  padding-top: 48px;
+}
+
+.rich-editor .rich-content {
+  min-height: 55dvh;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 17px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.rich-editor .rich-content:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.rich-content > :first-child {
+  margin-top: 0;
+}
+
+.rich-content p {
+  margin: 0 0 1em;
+}
+
+.rich-content h2 {
+  margin: 1.6em 0 0.5em;
+  font-size: 1.3rem;
+}
+
+.rich-content h3 {
+  margin: 1.4em 0 0.4em;
+  font-size: 1.1rem;
+}
+
+.rich-content ul,
+.rich-content ol {
+  margin: 0 0 1em;
+  padding-left: 1.4em;
+}
+
+.rich-content blockquote {
+  margin: 1em 0;
+  padding-left: 14px;
+  border-left: 4px solid var(--border);
+  color: var(--muted);
+}
+
+.rich-content a {
+  color: var(--accent);
+}
+
+.rich-content img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1em 0;
+  border-radius: 10px;
+}
+
+.rich-content img.ProseMirror-selectednode {
+  outline: 3px solid var(--accent);
+}
+
+.rich-content hr {
+  margin: 2em 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+.rich-content pre {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 0.9rem;
+}
+
+.rich-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.html-editor .cm-editor {
+  min-height: 55dvh;
+}
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  font-size: 0.92rem;
 }
