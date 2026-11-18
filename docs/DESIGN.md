@@ -316,7 +316,7 @@ post: post { title, bodyHtml, dateLabel, updatedLabel, cover, tags[] }, prev { t
 
 ### 8.3 編集画面
 - CodeMirror 6 で編集する。スマホでは全画面エディタにし、キーボードの上に `{{ }}` `<` `>` `/` `"` を入力する補助バーを出す。
-- **プレビュー**: `POST /api/admin/preview` に未保存のテンプレートとサンプルデータ（最新記事）を送り、`iframe srcdoc` に描画する。iframe には `sandbox="allow-scripts"` を付け、`allow-same-origin` は付けない。こうすると、プレビュー内のスクリプトは管理画面とは別の（どこにも属さない）オリジンで動き、管理画面の Cookie や API に触れられない。記事のプレビューも同じ方式にする。
+- **プレビュー**: `POST /api/admin/preview` に未保存のテンプレートを送り、実際のデータ（記事ページなら最新の記事、タグ別一覧なら記事の多いタグ）で描画して、`iframe srcdoc` に描画する。iframe には `sandbox="allow-scripts"` を付け、`allow-same-origin` は付けない。こうすると、プレビュー内のスクリプトは管理画面とは別の（どこにも属さない）オリジンで動き、管理画面の Cookie や API に触れられない。記事のプレビューも同じ方式にする。
 - **保存時の検証**: Mustache のパースに失敗したら保存しない（閉じ忘れの `{{#posts}}` など）。
 - **履歴**: 保存のたびに `template_revisions` に記録する（テンプレートごとに直近 30 件。超えた分は削除）。差分を見て任意の版に戻せる。
 - **初期値に戻す**: 初期テンプレートはソースコードに同梱しておき、いつでもリセットできる。
@@ -440,7 +440,7 @@ post: post { title, bodyHtml, dateLabel, updatedLabel, cover, tags[] }, prev { t
 | GET / PUT | `/templates/:name` | テンプレートの取得 / 保存（パース検証と履歴記録つき） |
 | GET  | `/templates/:name/revisions` | 履歴一覧 |
 | POST | `/templates/:name/restore` | `{ revisionId }` または `{ default: true }` で復元・初期化 |
-| POST | `/preview` | `{ template?, post? }` から HTML を生成 |
+| POST | `/preview` | `{ templates?: { 名前: 内容 }, name?, post? }` から HTML を生成。公開サイトの処理を、保存前のテンプレート・記事を重ねて呼び出す（CSS は data: URL で埋め込む） |
 | GET / POST / PUT / DELETE | `/pages` , `/pages/:id` | 固定ページの CRUD |
 | GET / PUT | `/settings` | サイト設定 |
 

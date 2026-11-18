@@ -1,7 +1,8 @@
 import { useEffect, type ReactNode } from 'react';
 
 /** 画面の下から出るパネル（スマホで片手でも操作しやすいように） */
-export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+/** wide: 画面いっぱいの高さで表示する（プレビューなど） */
+export function Sheet({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
@@ -16,7 +17,7 @@ export function Sheet({ title, onClose, children }: { title: string; onClose: ()
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+      <div className={`sheet${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <header className="sheet-header">
           <h2>{title}</h2>
           <button type="button" className="icon-close" aria-label="閉じる" onClick={onClose}>

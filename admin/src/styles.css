@@ -1047,7 +1047,7 @@ h2 {
   pointer-events: none;
 }
 
-.html-editor .cm-editor {
+.code-editor .cm-editor {
   min-height: 55dvh;
 }
 
@@ -1060,4 +1060,110 @@ h2 {
   border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
   font-size: 0.92rem;
+}
+
+/* ---------- デザイン（テンプレート編集）・プレビュー ---------- */
+
+.header-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+.tool.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9rem;
+}
+
+.sheet.wide {
+  height: 94dvh;
+  max-height: none;
+}
+
+.sheet.wide .sheet-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.sheet.wide .sheet-body > p {
+  padding: 16px;
+}
+
+.preview-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.var-group {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.var-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.var-list dd {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.var-name {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.revision-content {
+  max-height: 55dvh;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 編集画面のヘッダーは 1 行に収める */
+.editor-header > * {
+  flex: none;
+  white-space: nowrap;
+}
+
+.editor-header > .spacer,
+.editor-header > .header-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.unsaved-dot {
+  color: var(--accent);
+  font-size: 0.7rem;
+}
+
+.icon-btn.eye {
+  margin: 0;
+  border: 0;
+  background: none;
+  font-size: 1.3rem;
 }

@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono';
-import type { AppEnv } from '../env';
+import type { AppEnv, PreviewPost } from '../env';
 import { currentYear, dateIso, dateLabel } from '../lib/dates';
+import { makeExcerpt } from '../lib/html';
 import { now } from '../lib/http';
-import { enhanceBodyImages, mediaUrl, srcset, type MediaRow } from '../lib/media';
+import { enhanceBodyImages, extractMediaKeys, mediaKeyFromSrc, mediaUrl, srcset, type MediaRow } from '../lib/media';
 import { TAGS_JSON_SQL, parseTags } from '../lib/posts';
 import { cssHash, renderPage, siteCss } from '../lib/render';
 import { serveMedia } from './media';
@@ -11,6 +12,30 @@ import { tagKey, tagUrl } from '../lib/tags';
 
 export const publicApp = new Hono<AppEnv>();
 type C = Context<AppEnv>;
+
+/** 管理画面の記事プレビューで使う、保存前の記事の URL */
+export const PREVIEW_POST_SLUG = '__preview';
+
+/** プレビュー中にテンプレートの描画に失敗したことを表す（管理画面にエラーの内容を返すため） */
+class PreviewRenderError extends Error {}
+
+/** テンプレートで描画する（管理画面のプレビュー中は、保存前のテンプレートを使う） */
+async function render(c: C, pageName: string, view: Record<string, unknown>): Promise<string> {
+  if (!c.env.PREVIEW) return renderPage(c.env.DB, pageName, view);
+  try {
+    return await renderPage(c.env.DB, pageName, view, c.env.PREVIEW);
+  } catch (e) {
+    throw new PreviewRenderError(e instanceof Error ? e.message : String(e));
+  }
+}
+
+publicApp.onError((err, c) => {
+  if (err instanceof PreviewRenderError) {
+    return c.json({ message: `テンプレートを描画できませんでした: ${err.message}` }, 500, { 'X-Preview-Error': '1' });
+  }
+  console.error(err);
+  return c.text('Internal Server Error', 500);
+});
 
 // 公開ホストでは管理画面・管理 API を一切返さない
 publicApp.all('/admin/*', (c) => notFound(c));
@@ -118,7 +143,7 @@ function pagerView(basePath: string, current: number, total: number) {
 
 async function notFound(c: C) {
   const settings = await getSettings(c.env.DB);
-  const html = await renderPage(c.env.DB, '404', baseView(c, settings, { title: 'ページが見つかりません', path: c.req.path }));
+  const html = await render(c, '404', baseView(c, settings, { title: 'ページが見つかりません', path: c.req.path }));
   return c.html(html, 404);
 }
 
@@ -163,7 +188,7 @@ async function listPage(c: C, opts: { page: number; basePath: string; tag?: { id
     pager: pagerView(opts.basePath, opts.page, totalPages),
     tag: opts.tag ? { name: opts.tag.name, count: total } : null,
   };
-  return c.html(await renderPage(db, opts.tag ? 'tag' : 'home', view));
+  return c.html(await render(c, opts.tag ? 'tag' : 'home', view));
 }
 
 publicApp.get('/', (c) => listPage(c, { page: 1, basePath: '/' }));
@@ -191,7 +216,7 @@ publicApp.get('/tags', async (c) => {
     .all<{ name: string; count: number }>();
   const tags = results.map((r) => ({ name: r.name, url: tagUrl(r.name), count: r.count }));
   const view = { ...baseView(c, settings, { title: 'タグ', path: '/tags' }), tags, hasTags: tags.length > 0 };
-  return c.html(await renderPage(db, 'tags', view));
+  return c.html(await render(c, 'tags', view));
 });
 
 async function tagPage(c: C, rawPage: string | undefined) {
@@ -218,13 +243,16 @@ publicApp.get('/tags/:tag/page/:n', (c) => tagPage(c, c.req.param('n')));
 publicApp.get('/posts/:slug', async (c) => {
   const db = c.env.DB;
   const t = now();
-  const post = await db
-    .prepare(
-      `SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, p.body_html, ${COVER_SQL}, ${TAGS_JSON_SQL}
-       FROM posts p ${COVER_JOIN} WHERE p.slug = ? AND ${PUBLISHED}`,
-    )
-    .bind(c.req.param('slug'), t)
-    .first<PostPageRow>();
+  const previewPost = c.req.param('slug') === PREVIEW_POST_SLUG ? c.env.PREVIEW?.post : undefined;
+  const post = previewPost
+    ? await previewPostRow(c, previewPost)
+    : await db
+        .prepare(
+          `SELECT p.id, p.slug, p.title, p.excerpt, p.published_at, p.body_html, ${COVER_SQL}, ${TAGS_JSON_SQL}
+           FROM posts p ${COVER_JOIN} WHERE p.slug = ? AND ${PUBLISHED}`,
+        )
+        .bind(c.req.param('slug'), t)
+        .first<PostPageRow>();
   if (!post) return notFound(c);
 
   const neighbor = (op: '>' | '<', order: 'ASC' | 'DESC') =>
@@ -237,7 +265,9 @@ publicApp.get('/posts/:slug', async (c) => {
   const [newer, older, images] = await db.batch<{ slug: string; title: string } | MediaRow>([
     neighbor('>', 'ASC'),
     neighbor('<', 'DESC'),
-    db.prepare('SELECT m.* FROM post_media pm JOIN media m ON m.id = pm.media_id WHERE pm.post_id = ?').bind(post.id),
+    previewPost
+      ? mediaByKeysStatement(c, await extractMediaKeys(post.body_html, c.env.PUBLIC_HOST))
+      : db.prepare('SELECT m.* FROM post_media pm JOIN media m ON m.id = pm.media_id WHERE pm.post_id = ?').bind(post.id),
   ]);
   const mediaByKey = new Map((images!.results as MediaRow[]).map((m) => [m.r2_key, m]));
   const link = (r: unknown) => {
@@ -263,8 +293,35 @@ publicApp.get('/posts/:slug', async (c) => {
     newer: link(newer!.results[0]),
     older: link(older!.results[0]),
   };
-  return c.html(await renderPage(db, 'post', view));
+  return c.html(await render(c, 'post', view));
 });
+
+/** 指定したキーの画像を取り出す（キーは JSON 配列で渡す） */
+function mediaByKeysStatement(c: C, keys: string[]): D1PreparedStatement {
+  return c.env.DB.prepare('SELECT * FROM media WHERE r2_key IN (SELECT value FROM json_each(?))').bind(JSON.stringify(keys));
+}
+
+/** 管理画面から送られた保存前の記事を、DB から読んだ記事と同じ形にする */
+async function previewPostRow(c: C, data: PreviewPost): Promise<PostPageRow> {
+  const keys = await extractMediaKeys(data.bodyHtml, c.env.PUBLIC_HOST);
+  const chosen = data.coverImage ? mediaKeyFromSrc(data.coverImage, c.env.PUBLIC_HOST)?.replace(/-w800(\.\w+)$/, '$1') : null;
+  const coverKey = chosen ?? keys[0] ?? null;
+  const cover = coverKey ? await c.env.DB.prepare('SELECT * FROM media WHERE r2_key = ?').bind(coverKey).first<MediaRow>() : null;
+  return {
+    id: 0,
+    slug: PREVIEW_POST_SLUG,
+    title: data.title,
+    excerpt: await makeExcerpt(data.bodyHtml),
+    published_at: data.publishedAt ?? now(),
+    body_html: data.bodyHtml,
+    tags_json: JSON.stringify(data.tags),
+    cover_key: cover?.r2_key ?? null,
+    cover_thumb_key: cover?.thumb_key ?? null,
+    cover_width: cover?.width ?? null,
+    cover_height: cover?.height ?? null,
+    cover_alt: cover?.alt ?? null,
+  };
+}
 
 // ---------- CSS ----------
 
