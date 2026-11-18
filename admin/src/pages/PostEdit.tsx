@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useBlocker, useNavigate, useParams } from 'react-router';
 import { CoverPicker } from '../components/CoverPicker';
 import { BodyEditor } from '../components/editor/BodyEditor';
@@ -28,6 +28,22 @@ type Form = {
 };
 
 const EMPTY: Form = { title: '', bodyHtml: '', editorMode: 'rich', tags: [], slug: '', excerpt: '', status: 'draft', publishedAt: null, coverImage: null };
+
+/** 2 つのフォームの内容が同じか（本文が長くても、入力のたびに全体を文字列にしないで比べる） */
+function sameForm(a: Form, b: Form): boolean {
+  return (
+    a.bodyHtml === b.bodyHtml &&
+    a.title === b.title &&
+    a.editorMode === b.editorMode &&
+    a.slug === b.slug &&
+    a.excerpt === b.excerpt &&
+    a.status === b.status &&
+    a.publishedAt === b.publishedAt &&
+    a.coverImage === b.coverImage &&
+    a.tags.length === b.tags.length &&
+    a.tags.every((t, i) => t === b.tags[i])
+  );
+}
 
 function formOf(post: Post): Form {
   return {
@@ -62,6 +78,8 @@ export function PostEdit() {
   /** 復元するか確認している間は、自動保存で上書きしない */
   const [draftChecked, setDraftChecked] = useState(false);
   const key = draftKey(id);
+  /** 新しい記事を作った直後、保存中に打った内容を、移動先の画面に引き継ぐ */
+  const carryOver = useRef<Form | null>(null);
 
   useEffect(() => {
     // posts/new → posts/:id の移動では同じ画面が使い回されるので、ここで戻す
@@ -71,7 +89,7 @@ export function PostEdit() {
     // 端末に残っている下書きが、サーバーの内容と違えば復元するか確認する
     const checkDraft = (server: Form) => {
       const draft = loadDraft<Form>(draftKey(id));
-      if (draft && JSON.stringify({ ...EMPTY, ...draft.form }) !== JSON.stringify(server)) setPendingDraft(draft);
+      if (draft && !sameForm({ ...EMPTY, ...draft.form }, server)) setPendingDraft(draft);
       else setDraftChecked(true);
     };
     if (isNew) {
@@ -83,7 +101,8 @@ export function PostEdit() {
       .then(({ post }) => {
         if (cancelled) return;
         setPost(post);
-        setForm(formOf(post));
+        setForm(carryOver.current ?? formOf(post));
+        carryOver.current = null;
         checkDraft(formOf(post));
       })
       .catch((e: Error) => !cancelled && setLoadError(e.message));
@@ -93,7 +112,7 @@ export function PostEdit() {
   }, [id, isNew]);
 
   const saved = useMemo(() => (post ? formOf(post) : EMPTY), [post]);
-  const dirty = JSON.stringify(form) !== JSON.stringify(saved);
+  const dirty = !sameForm(form, saved);
 
   // 未保存のまま画面を離れようとしたら確認する（アプリ内の移動とタブを閉じる操作の両方）
   const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
@@ -120,6 +139,24 @@ export function PostEdit() {
     return () => clearTimeout(timer);
   }, [form, dirty, draftChecked, key, post?.updatedAt]);
 
+  /** 待ち時間を置かずに、今の内容を端末に保存する（画面を閉じる・再読み込みする直前など） */
+  const latest = useRef({ form, dirty, draftChecked, key, baseUpdatedAt: post?.updatedAt ?? null });
+  latest.current = { form, dirty, draftChecked, key, baseUpdatedAt: post?.updatedAt ?? null };
+  const flushDraft = useCallback(() => {
+    const l = latest.current;
+    if (l.draftChecked && l.dirty) saveDraft<Form>(l.key, { form: l.form, savedAt: Date.now(), baseUpdatedAt: l.baseUpdatedAt });
+  }, []);
+  useEffect(() => {
+    // スマホでは、アプリの切り替えやタブを閉じるときに visibilitychange / pagehide が来る
+    const onHide = () => document.visibilityState === 'hidden' && flushDraft();
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('pagehide', flushDraft);
+    return () => {
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('pagehide', flushDraft);
+    };
+  }, [flushDraft]);
+
   function restoreDraft() {
     if (!pendingDraft) return;
     setForm({ ...EMPTY, ...pendingDraft.form });
@@ -138,6 +175,7 @@ export function PostEdit() {
   async function save(nextStatus: Form['status'] = form.status) {
     setSaving(true);
     setMessage(null);
+    const sent = form;
     const body = {
       title: form.title,
       bodyHtml: form.bodyHtml,
@@ -154,16 +192,21 @@ export function PostEdit() {
         ? await api<{ post: Post }>('/posts', { method: 'POST', body })
         : await api<{ post: Post }>(`/posts/${id}`, { method: 'PUT', body: { ...body, updatedAt: post!.updatedAt } });
       setPost(res.post);
-      setForm(formOf(res.post));
-      clearDraft(key);
+      // 保存の通信中に入力された内容は消さずに残す（未保存として扱われる）
+      const editedWhileSaving = !sameForm(latest.current.form, sent);
+      setForm((f) => (sameForm(f, sent) ? formOf(res.post) : f));
+      if (!editedWhileSaving) clearDraft(key);
       setMessage({ type: 'success', text: nextStatus === 'published' && res.post.state === 'published' ? '公開しました' : '保存しました' });
       if (isNew) {
-        clearDraft(draftKey(undefined));
+        clearDraft(key);
+        if (editedWhileSaving) carryOver.current = latest.current.form;
         leaving.current = true;
         navigate(`/posts/${res.post.id}`, { replace: true });
       }
     } catch (e) {
       const conflict = e instanceof ApiError && e.code === 'conflict';
+      // 競合したら再読み込みしてもらうので、その前に今の内容を端末に残す
+      if (conflict) flushDraft();
       setMessage({ type: 'error', text: e instanceof Error ? e.message : String(e), conflict });
     } finally {
       setSaving(false);

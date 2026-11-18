@@ -1,6 +1,7 @@
+import type { EditorOptions } from '@tiptap/core';
 import { Placeholder } from '@tiptap/extensions';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
-import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { editorExtensions } from './extensions';
 import { imageFilesOf, type EditorHandle, type EditorProps } from './types';
 
@@ -12,6 +13,12 @@ function outputHtml(editor: { isEmpty: boolean; getHTML: () => string }): string
   return editor.isEmpty ? '' : editor.getHTML().replace(/(?:<p><\/p>)+$/, '');
 }
 
+/**
+ * Tiptap は描画のたびに設定を前回と比べ、違えばエディタを設定し直す。
+ * 拡張機能や editorProps を毎回作り直すと入力中にエディタが壊れるので、設定は一度だけ作る。
+ */
+const EXTENSIONS = [...editorExtensions(), Placeholder.configure({ placeholder: '本文を書く…' })];
+
 /** リッチテキストエディタ（Tiptap）。保存する形式は HTML */
 const RichEditor = forwardRef<EditorHandle, EditorProps & { toolbarSlot: (toolbar: ReactNode) => ReactNode }>(function RichEditor(
   { value, onChange, onImageFiles, onFocusChange, toolbarSlot },
@@ -19,36 +26,46 @@ const RichEditor = forwardRef<EditorHandle, EditorProps & { toolbarSlot: (toolba
 ) {
   // 最新のコールバックを参照する（エディタは 1 度だけ作るため）
   const callbacks = useRef({ onChange, onImageFiles, onFocusChange });
+  /** 一度でも本文にカーソルを置いたか（置いていなければ、画像は末尾に入れる） */
+  const touched = useRef(false);
   callbacks.current = { onChange, onImageFiles, onFocusChange };
 
-  const editor = useEditor({
-    extensions: [...editorExtensions(), Placeholder.configure({ placeholder: '本文を書く…' })],
-    content: value,
-    immediatelyRender: true,
-    editorProps: {
-      attributes: { class: 'rich-content', 'aria-label': '本文', 'aria-multiline': 'true', role: 'textbox' },
-      handlePaste(_view, event) {
-        const files = imageFilesOf(event.clipboardData);
-        if (files.length === 0) return false;
-        callbacks.current.onImageFiles(files);
-        return true;
-      },
-      handleDrop(_view, event) {
-        const files = imageFilesOf((event as DragEvent).dataTransfer);
-        if (files.length === 0) return false;
-        event.preventDefault();
-        callbacks.current.onImageFiles(files);
-        return true;
-      },
+  // 最初の内容だけを渡す（後から変わった内容は下の effect で反映する）
+  const [initialContent] = useState(value);
+  const [editorProps] = useState<EditorOptions['editorProps']>(() => ({
+    attributes: { class: 'rich-content', 'aria-label': '本文', 'aria-multiline': 'true', role: 'textbox' },
+    handlePaste(_view, event) {
+      const files = imageFilesOf(event.clipboardData);
+      if (files.length === 0) return false;
+      callbacks.current.onImageFiles(files);
+      return true;
     },
+    handleDrop(_view, event) {
+      const files = imageFilesOf((event as DragEvent).dataTransfer);
+      if (files.length === 0) return false;
+      event.preventDefault();
+      callbacks.current.onImageFiles(files);
+      return true;
+    },
+  }));
+
+  const editor = useEditor({
+    extensions: EXTENSIONS,
+    content: initialContent,
+    immediatelyRender: true,
+    editorProps,
     onUpdate: ({ editor }) => callbacks.current.onChange(outputHtml(editor)),
-    onFocus: () => callbacks.current.onFocusChange?.(true),
+    onFocus: () => {
+      touched.current = true;
+      callbacks.current.onFocusChange?.(true);
+    },
     onBlur: () => callbacks.current.onFocusChange?.(false),
   });
 
   // 外から本文が変わったとき（下書きの復元など）だけ、エディタの中身を入れ替える
   useEffect(() => {
     // 比較は保存用に整えた HTML 同士で行う（入力のたびに中身を入れ替えてカーソルが飛ばないように）
+    if (editor.isDestroyed) return;
     if (value !== outputHtml(editor)) editor.commands.setContent(value, { emitUpdate: false });
   }, [editor, value]);
 
@@ -56,11 +73,17 @@ const RichEditor = forwardRef<EditorHandle, EditorProps & { toolbarSlot: (toolba
     ref,
     () => ({
       insertImages(media) {
-        editor
-          .chain()
-          .focus()
-          .insertContent(media.map((m) => ({ type: 'image', attrs: { src: m.url, alt: m.alt } })))
-          .run();
+        if (editor.isDestroyed || media.length === 0) return;
+        // カーソルを置いたことがなければ末尾に入れる。
+        // focus() を同じ chain に入れると、フォーカスが外れているときに古い状態の変更が適用されて失敗するので、挿入の後に分けて呼ぶ
+        const { from, to } = editor.state.selection;
+        const end = editor.state.doc.content.size;
+        const range = touched.current ? { from, to } : end;
+        editor.commands.insertContentAt(
+          range,
+          media.map((m) => ({ type: 'image', attrs: { src: m.url, alt: m.alt } })),
+        );
+        editor.commands.focus();
       },
       focus: () => editor.commands.focus(),
     }),

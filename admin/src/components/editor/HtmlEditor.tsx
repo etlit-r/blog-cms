@@ -20,6 +20,8 @@ const theme = EditorView.theme({
 const HtmlEditor = forwardRef<EditorHandle, EditorProps>(function HtmlEditor({ value, onChange, onImageFiles, onFocusChange }, ref) {
   const container = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
+  /** 一度でも入力欄にカーソルを置いたか（置いていなければ、画像は末尾に入れる） */
+  const touched = useRef(false);
   const callbacks = useRef({ onChange, onImageFiles, onFocusChange });
   callbacks.current = { onChange, onImageFiles, onFocusChange };
 
@@ -40,7 +42,10 @@ const HtmlEditor = forwardRef<EditorHandle, EditorProps>(function HtmlEditor({ v
           EditorView.contentAttributes.of({ 'aria-label': '本文（HTML）', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' }),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) callbacks.current.onChange(u.state.doc.toString());
-            if (u.focusChanged) callbacks.current.onFocusChange?.(u.view.hasFocus);
+            if (u.focusChanged) {
+              if (u.view.hasFocus) touched.current = true;
+              callbacks.current.onFocusChange?.(u.view.hasFocus);
+            }
           }),
           EditorView.domEventHandlers({
             paste(event) {
@@ -77,7 +82,8 @@ const HtmlEditor = forwardRef<EditorHandle, EditorProps>(function HtmlEditor({ v
     insertImages(media) {
       const v = view.current;
       if (!v || media.length === 0) return;
-      const { from, to } = v.state.selection.main;
+      const end = v.state.doc.length;
+      const { from, to } = touched.current ? v.state.selection.main : { from: end, to: end };
       const before = v.state.doc.sliceString(0, from);
       const text = `${before && !before.endsWith('\n') ? '\n' : ''}${media.map(imageHtml).join('\n')}\n`;
       v.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } });
