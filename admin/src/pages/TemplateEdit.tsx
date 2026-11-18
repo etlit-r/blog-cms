@@ -44,10 +44,13 @@ export function TemplateEdit() {
     };
   }, [name]);
 
-  /** サーバーから返ってきたテンプレートを、保存済みの内容として画面に反映する */
-  function applySaved(t: Template, text: string) {
+  /**
+   * サーバーから返ってきたテンプレートを、保存済みの内容として画面に反映する。
+   * sent を渡したときは、通信中に入力された内容（sent と違う内容）を消さずに残す。
+   */
+  function applySaved(t: Template, text: string, sent?: string) {
     setTemplate(t);
-    setContent(t.content);
+    setContent((current) => (sent === undefined || current === sent ? t.content : current));
     setMessage({ type: 'success', text });
   }
 
@@ -55,12 +58,13 @@ export function TemplateEdit() {
     if (!template) return;
     setSaving(true);
     setMessage(null);
+    const sent = content;
     try {
       const res = await api<{ template: Template }>(`/templates/${encodeURIComponent(name)}`, {
         method: 'PUT',
-        body: { content, updatedAt: template.updatedAt },
+        body: { content: sent, updatedAt: template.updatedAt },
       });
-      applySaved(res.template, '保存しました。公開サイトに反映されています');
+      applySaved(res.template, '保存しました。公開サイトに反映されています', sent);
     } catch (e) {
       setMessage({ type: 'error', text: e instanceof Error ? e.message : String(e), conflict: e instanceof ApiError && e.code === 'conflict' });
     } finally {
@@ -79,7 +83,10 @@ export function TemplateEdit() {
   }
 
   function resetToDefault() {
-    if (!window.confirm('初期の内容に戻しますか？今の内容は履歴に残っているので、後から戻せます。')) return;
+    const question = dirty
+      ? '初期の内容に戻しますか？保存していない変更は失われます（保存済みの内容は履歴から戻せます）。'
+      : '初期の内容に戻しますか？今の内容は履歴に残っているので、後から戻せます。';
+    if (!window.confirm(question)) return;
     void restore({ default: true }, '初期の内容に戻しました');
   }
 

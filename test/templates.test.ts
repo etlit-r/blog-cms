@@ -79,6 +79,9 @@ describe('テンプレートの保存', () => {
     expect((await put('home', 'B', null)).status).toBe(409);
     expect((await put('home', 'C', first.updatedAt! - 1)).status).toBe(409);
     expect((await put('home', 'D', first.updatedAt)).status).toBe(200);
+    // 拒否された保存（B・C）は履歴に残らない
+    const { items } = (await (await api('/templates/home/revisions', { cookie })).json()) as { items: unknown[] };
+    expect(items).toHaveLength(2);
   });
 
   it('履歴は 30 件まで残す', async () => {
