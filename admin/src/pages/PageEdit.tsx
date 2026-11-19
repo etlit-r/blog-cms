@@ -14,12 +14,13 @@ type Form = {
   bodyHtml: string;
   editorMode: EditorMode;
   status: 'draft' | 'published';
-  sortOrder: number;
+  /** 入力中の文字のまま持つ（空や「-」も途中で入力できるように）。保存するときに整数にする */
+  sortOrder: string;
 };
 
-const EMPTY: Form = { title: '', slug: '', bodyHtml: '', editorMode: 'rich', status: 'draft', sortOrder: 0 };
+const EMPTY: Form = { title: '', slug: '', bodyHtml: '', editorMode: 'rich', status: 'draft', sortOrder: '0' };
 
-const formOf = (p: FixedPage): Form => ({ title: p.title, slug: p.slug, bodyHtml: p.bodyHtml, editorMode: p.editorMode, status: p.status, sortOrder: p.sortOrder });
+const formOf = (p: FixedPage): Form => ({ title: p.title, slug: p.slug, bodyHtml: p.bodyHtml, editorMode: p.editorMode, status: p.status, sortOrder: String(p.sortOrder) });
 
 const sameForm = (a: Form, b: Form) =>
   a.bodyHtml === b.bodyHtml && a.title === b.title && a.slug === b.slug && a.editorMode === b.editorMode && a.status === b.status && a.sortOrder === b.sortOrder;
@@ -63,7 +64,13 @@ export function PageEdit() {
     setSaving(true);
     setMessage(null);
     const sent = form;
-    const body = { ...sent, slug: sent.slug || null };
+    const order = sent.sortOrder.trim() === '' ? 0 : Number(sent.sortOrder);
+    if (!Number.isInteger(order)) {
+      setSaving(false);
+      setMessage({ type: 'error', text: '並び順は整数で入力してください' });
+      return;
+    }
+    const body = { ...sent, slug: sent.slug || null, sortOrder: order };
     try {
       const res = isNew
         ? await api<{ page: FixedPage }>('/pages', { method: 'POST', body })
@@ -161,10 +168,10 @@ export function PageEdit() {
           <Field
             label="並び順"
             hint="ヘッダーに並べる順番です。小さい数字ほど前に出ます。"
-            type="number"
-            inputMode="numeric"
-            value={String(form.sortOrder)}
-            onChange={(e) => set('sortOrder', Number.parseInt(e.target.value, 10) || 0)}
+            // iPhone の数字キーボードには「-」がないので、普通の入力欄にする
+            type="text"
+            value={form.sortOrder}
+            onChange={(e) => set('sortOrder', e.target.value)}
           />
           {page?.status === 'published' && settings && (
             <a href={`${settings.publicUrl}/p/${page.slug}`} target="_blank" rel="noopener" className="btn">
