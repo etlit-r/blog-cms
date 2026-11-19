@@ -62,3 +62,32 @@ export async function makeExcerpt(html: string): Promise<string> {
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 }
+
+/**
+ * 本文の中の「/」で始まるリンク・画像の URL を、origin（例: https://etlits.dev）付きの絶対 URL にする。
+ * RSS リーダーなど、サイトの外で本文を表示するときに使う。
+ */
+export async function absolutizeUrls(html: string, origin: string): Promise<string> {
+  const fix = (attr: string) => ({
+    element(el: Element) {
+      const value = el.getAttribute(attr);
+      if (value && value.startsWith('/') && !value.startsWith('//')) el.setAttribute(attr, origin + value);
+    },
+  });
+  return new HTMLRewriter().on('a[href]', fix('href')).on('img[src]', fix('src')).on('img[srcset]', {
+    element(el) {
+      const value = el.getAttribute('srcset');
+      if (value) el.setAttribute('srcset', value.replace(/(^|,\s*)(\/(?!\/))/g, `$1${origin}/`));
+    },
+  }).transform(new Response(html)).text();
+}
+
+/** XML の特殊文字をエスケープする */
+export function escapeXml(s: string): string {
+  return s.replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[ch]!);
+}
+
+/** CDATA の中に入れる文字列（"]]>" で CDATA が終わらないように分割する） */
+export function cdata(s: string): string {
+  return `<![CDATA[${s.replace(/]]>/g, ']]]]><![CDATA[>')}]]>`;
+}

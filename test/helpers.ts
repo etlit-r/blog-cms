@@ -30,6 +30,8 @@ export async function resetDb() {
     db.prepare(
       "UPDATE settings SET value = CASE key WHEN 'site_title' THEN 'etlits' WHEN 'site_description' THEN '' WHEN 'posts_per_page' THEN '10' ELSE value END",
     ),
+    // 前のテストで作られた公開ページのキャッシュを使わないよう、キャッシュのキーを変える
+    db.prepare("UPDATE settings SET value = CAST(value AS INTEGER) + 1 WHERE key = 'content_version'"),
   ]);
 }
 

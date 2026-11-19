@@ -64,7 +64,10 @@ export function Posts() {
           onChange={(e) => setQuery(e.target.value)}
         />
         <Link to="/tags" className="btn small">
-          タグ管理
+          タグ
+        </Link>
+        <Link to="/pages" className="btn small">
+          固定ページ
         </Link>
       </div>
 

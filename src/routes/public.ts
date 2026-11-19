@@ -1,9 +1,10 @@
 import { Hono, type Context } from 'hono';
 import type { AppEnv, PreviewPost } from '../env';
 import { currentYear, dateIso, dateLabel } from '../lib/dates';
-import { makeExcerpt } from '../lib/html';
+import { absolutizeUrls, cdata, escapeXml, makeExcerpt } from '../lib/html';
 import { now } from '../lib/http';
 import { enhanceBodyImages, extractMediaKeys, mediaKeyFromSrc, mediaUrl, srcset, type MediaRow } from '../lib/media';
+import { navPages, pageUrl } from '../lib/pages';
 import { TAGS_JSON_SQL, parseTags } from '../lib/posts';
 import { cssHash, renderPage, siteCss } from '../lib/render';
 import { serveMedia } from './media';
@@ -19,11 +20,15 @@ export const PREVIEW_POST_SLUG = '__preview';
 /** プレビュー中にテンプレートの描画に失敗したことを表す（管理画面にエラーの内容を返すため） */
 class PreviewRenderError extends Error {}
 
-/** テンプレートで描画する（管理画面のプレビュー中は、保存前のテンプレートを使う） */
+/**
+ * テンプレートで描画する（管理画面のプレビュー中は、保存前のテンプレートを使う）。
+ * どのページでも使える nav（ヘッダーに並べる固定ページ）をここで足す。
+ */
 async function render(c: C, pageName: string, view: Record<string, unknown>): Promise<string> {
-  if (!c.env.PREVIEW) return renderPage(c.env.DB, pageName, view);
+  const full = { ...view, nav: { pages: await navPages(c.env.DB) } };
+  if (!c.env.PREVIEW) return renderPage(c.env.DB, pageName, full);
   try {
-    return await renderPage(c.env.DB, pageName, view, c.env.PREVIEW);
+    return await renderPage(c.env.DB, pageName, full, c.env.PREVIEW);
   } catch (e) {
     throw new PreviewRenderError(e instanceof Error ? e.message : String(e));
   }
@@ -35,6 +40,41 @@ publicApp.onError((err, c) => {
   }
   console.error(err);
   return c.text('Internal Server Error', 500);
+});
+
+// ---------- キャッシュ ----------
+
+/**
+ * 公開ページ（HTML・RSS・サイトマップ）を Worker の Cache API に入れ、同じページは D1 を読まずに返す。
+ * キャッシュのキーには settings.content_version を含める。記事・テンプレート・設定などを保存すると
+ * content_version が増えるので、古いキャッシュは使われなくなる（消す必要がない）。
+ * 予約投稿が公開時刻を過ぎても表示されるよう、キャッシュは最長 5 分にする。
+ */
+export const PAGE_CACHE_SECONDS = 300;
+const UNCACHED_PREFIXES = ['/media/', '/assets/', '/admin/', '/api/'];
+const CACHEABLE_TYPES = /^(text\/html|application\/rss\+xml|application\/xml|text\/plain)/;
+
+publicApp.use('*', async (c, next) => {
+  const path = c.req.path;
+  if (c.req.method !== 'GET' || c.env.PREVIEW || UNCACHED_PREFIXES.some((p) => path.startsWith(p))) return next();
+
+  const row = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'content_version'").first<{ value: string }>();
+  // クエリ文字列はページの内容に関係しないので、キーに含めない（?xxx を付けたアクセスでキャッシュが増えないように）
+  const key = new Request(`https://${c.env.PUBLIC_HOST}${path}?__v=${encodeURIComponent(row?.value ?? '0')}`);
+  const cache = caches.default;
+  const hit = await cache.match(key);
+  if (hit) {
+    const res = new Response(hit.body, hit);
+    res.headers.set('X-Cache', 'HIT');
+    return res;
+  }
+
+  await next();
+  if (c.res.status !== 200 || !CACHEABLE_TYPES.test(c.res.headers.get('Content-Type') ?? '')) return;
+  // ブラウザには毎回確かめさせ、Cloudflare のキャッシュ（Cache API）だけに 5 分残す
+  c.res.headers.set('Cache-Control', `public, max-age=0, s-maxage=${PAGE_CACHE_SECONDS}`);
+  c.res.headers.set('X-Cache', 'MISS');
+  c.executionCtx.waitUntil(cache.put(key, c.res.clone()));
 });
 
 // 公開ホストでは管理画面・管理 API を一切返さない
@@ -322,6 +362,116 @@ async function previewPostRow(c: C, data: PreviewPost): Promise<PostPageRow> {
     cover_alt: cover?.alt ?? null,
   };
 }
+
+// ---------- 固定ページ ----------
+
+publicApp.get('/p/:slug', async (c) => {
+  const db = c.env.DB;
+  const page = await db
+    .prepare("SELECT slug, title, body_html FROM pages WHERE slug = ? AND status = 'published'")
+    .bind(c.req.param('slug'))
+    .first<{ slug: string; title: string; body_html: string }>();
+  if (!page) return notFound(c);
+
+  const keys = await extractMediaKeys(page.body_html, c.env.PUBLIC_HOST);
+  const { results: images } = await mediaByKeysStatement(c, keys).all<MediaRow>();
+  const settings = await getSettings(db);
+  const view = {
+    ...baseView(c, settings, { title: page.title, description: await makeExcerpt(page.body_html), path: pageUrl(page.slug) }),
+    fixedPage: {
+      title: page.title,
+      bodyHtml: await enhanceBodyImages(page.body_html, new Map(images.map((m) => [m.r2_key, m])), c.env.PUBLIC_HOST),
+    },
+  };
+  return c.html(await render(c, 'page', view));
+});
+
+// ---------- RSS・サイトマップ・robots.txt ----------
+
+const FEED_ITEMS = 20;
+
+publicApp.get('/feed.xml', async (c) => {
+  const db = c.env.DB;
+  const origin = absoluteUrl(c, '');
+  const [settings, { results }] = await Promise.all([
+    getSettings(db),
+    db
+      .prepare(`SELECT p.slug, p.title, p.excerpt, p.body_html, p.published_at FROM posts p WHERE ${PUBLISHED} ORDER BY p.published_at DESC, p.id DESC LIMIT ?`)
+      .bind(now(), FEED_ITEMS)
+      .all<{ slug: string; title: string; excerpt: string | null; body_html: string; published_at: number }>(),
+  ]);
+
+  const items = await Promise.all(
+    results.map(async (p) => {
+      const url = `${origin}/posts/${p.slug}`;
+      return `    <item>
+      <title>${escapeXml(p.title)}</title>
+      <link>${escapeXml(url)}</link>
+      <guid isPermaLink="true">${escapeXml(url)}</guid>
+      <pubDate>${new Date(p.published_at * 1000).toUTCString()}</pubDate>
+      <description>${escapeXml(p.excerpt ?? '')}</description>
+      <content:encoded>${cdata(await absolutizeUrls(p.body_html, origin))}</content:encoded>
+    </item>`;
+    }),
+  );
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>${escapeXml(settings.siteTitle)}</title>
+    <link>${escapeXml(`${origin}/`)}</link>
+    <description>${escapeXml(settings.siteDescription)}</description>
+    <language>ja</language>
+    <atom:link href="${escapeXml(`${origin}/feed.xml`)}" rel="self" type="application/rss+xml"/>
+${items.join('\n')}
+  </channel>
+</rss>
+`;
+  return c.body(xml, 200, { 'Content-Type': 'application/rss+xml; charset=utf-8' });
+});
+
+publicApp.get('/sitemap.xml', async (c) => {
+  const db = c.env.DB;
+  const origin = absoluteUrl(c, '');
+  const t = now();
+  const [posts, tags, pages] = await db.batch<{ path: string; lastmod: number | null }>([
+    // 予約投稿は公開時刻にページが現れるので、更新日時と公開日時の新しいほうを更新日にする
+    db.prepare(`SELECT '/posts/' || p.slug AS path, MAX(p.updated_at, p.published_at) AS lastmod FROM posts p WHERE ${PUBLISHED} ORDER BY p.published_at DESC`).bind(t),
+    db
+      .prepare(
+        `SELECT t.name AS path, MAX(MAX(p.updated_at, p.published_at)) AS lastmod FROM tags t JOIN post_tags pt ON pt.tag_id = t.id
+         JOIN posts p ON p.id = pt.post_id AND ${PUBLISHED} GROUP BY t.id ORDER BY t.name`,
+      )
+      .bind(t),
+    db.prepare("SELECT '/p/' || slug AS path, updated_at AS lastmod FROM pages WHERE status = 'published' ORDER BY sort_order, id"),
+  ]);
+  // トップとタグ一覧は、いちばん最近更新された公開記事の日時を更新日にする（Google はクロールの目安に使う）
+  const latest = posts!.results.reduce<number | null>((max, p) => (p.lastmod !== null && (max === null || p.lastmod > max) ? p.lastmod : max), null);
+  const entries = [
+    { path: '/', lastmod: latest },
+    ...posts!.results,
+    { path: '/tags', lastmod: latest },
+    // タグ名は URL に使えない文字を含むので、ここでエンコードする
+    ...tags!.results.map((r) => ({ path: tagUrl(r.path), lastmod: r.lastmod })),
+    ...pages!.results,
+  ];
+  const urls = entries
+    .map(
+      (e) =>
+        `  <url><loc>${escapeXml(origin + e.path)}</loc>${e.lastmod ? `<lastmod>${new Date(e.lastmod * 1000).toISOString()}</lastmod>` : ''}</url>`,
+    )
+    .join('\n');
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>
+`;
+  return c.body(xml, 200, { 'Content-Type': 'application/xml; charset=utf-8' });
+});
+
+publicApp.get('/robots.txt', (c) =>
+  c.body(`User-agent: *\nAllow: /\n\nSitemap: ${absoluteUrl(c, '/sitemap.xml')}\n`, 200, { 'Content-Type': 'text/plain; charset=utf-8' }),
+);
 
 // ---------- CSS ----------
 

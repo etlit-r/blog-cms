@@ -18,8 +18,17 @@ export const media = new Hono<AppEnv>();
 
 const PAGE_SIZE = 30;
 /** 画像を使っている記事の数（本文で使っている記事と、カバーにしている記事。usedBy と同じ条件） */
-const USAGE_SQL = `(SELECT COUNT(*) FROM posts p
-    WHERE p.cover_media_id = m.id OR EXISTS (SELECT 1 FROM post_media pm WHERE pm.post_id = p.id AND pm.media_id = m.id)
+/** 本文に画像のキー（元画像かサムネイル）が含まれている固定ページの条件（pg は pages の別名） */
+const PAGE_USES_SQL = '(instr(pg.body_html, m.r2_key) > 0 OR instr(pg.body_html, m.thumb_key) > 0)';
+
+/**
+ * 画像を使っている記事・固定ページの数（usedBy と同じ条件）。
+ * 記事は本文（post_media）かカバー、固定ページは本文に URL が含まれているかで判定する。
+ */
+const USAGE_SQL = `(
+    (SELECT COUNT(*) FROM posts p
+      WHERE p.cover_media_id = m.id OR EXISTS (SELECT 1 FROM post_media pm WHERE pm.post_id = p.id AND pm.media_id = m.id))
+    + (SELECT COUNT(*) FROM pages pg WHERE ${PAGE_USES_SQL})
   ) AS usage_count`;
 
 async function readImage(value: unknown, label: string): Promise<{ bytes: Uint8Array; mime: MediaMime } | string> {
@@ -101,7 +110,7 @@ media.get('/:id', async (c) => {
   const id = parseId(c.req.param('id'));
   const row = id && (await c.env.DB.prepare(`SELECT m.*, ${USAGE_SQL} FROM media m WHERE m.id = ?`).bind(id).first<MediaRow & { usage_count: number }>());
   if (!row) return apiError(c, 404, 'not_found', '画像が見つかりません');
-  return c.json({ media: toApiMedia(row), posts: await usedBy(c.env.DB, row.id) });
+  return c.json({ media: toApiMedia(row), ...(await usedBy(c.env.DB, row)) });
 });
 
 media.put('/:id', async (c) => {
@@ -128,10 +137,11 @@ media.delete('/:id', async (c) => {
   const row = id && (await db.prepare('SELECT * FROM media WHERE id = ?').bind(id).first<MediaRow>());
   if (!row) return apiError(c, 404, 'not_found', '画像が見つかりません');
 
-  const posts = await usedBy(db, row.id);
-  if (posts.length > 0 && c.req.query('force') !== '1') {
+  const { posts, pages } = await usedBy(db, row);
+  const count = posts.length + pages.length;
+  if (count > 0 && c.req.query('force') !== '1') {
     return c.json(
-      { error: { code: 'in_use', message: `この画像は ${posts.length} 件の記事で使われています`, posts } },
+      { error: { code: 'in_use', message: `この画像は ${count} 件の記事・固定ページで使われています`, posts, pages } },
       409,
     );
   }
@@ -151,14 +161,18 @@ media.delete('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-/** 画像を本文かカバーで使っている記事 */
-async function usedBy(db: D1Database, mediaId: number) {
-  const { results } = await db
-    .prepare(
-      `SELECT id, title FROM posts WHERE id IN (SELECT post_id FROM post_media WHERE media_id = ?) OR cover_media_id = ?
-       ORDER BY updated_at DESC`,
-    )
-    .bind(mediaId, mediaId)
-    .all<{ id: number; title: string }>();
-  return results;
+/** 画像を使っている記事（本文かカバー）と固定ページ */
+async function usedBy(db: D1Database, media: Pick<MediaRow, 'id' | 'r2_key' | 'thumb_key'>) {
+  const [posts, pages] = await db.batch<{ id: number; title: string }>([
+    db
+      .prepare(
+        `SELECT id, title FROM posts WHERE id IN (SELECT post_id FROM post_media WHERE media_id = ?) OR cover_media_id = ?
+         ORDER BY updated_at DESC`,
+      )
+      .bind(media.id, media.id),
+    db
+      .prepare(`SELECT pg.id, pg.title FROM pages pg, (SELECT ? AS r2_key, ? AS thumb_key) m WHERE ${PAGE_USES_SQL} ORDER BY pg.updated_at DESC`)
+      .bind(media.r2_key, media.thumb_key),
+  ]);
+  return { posts: posts!.results, pages: pages!.results };
 }

@@ -5,6 +5,7 @@ import { apiError } from '../../lib/http';
 import { serveMedia } from '../media';
 import { auth, getSessionToken } from './auth';
 import { media } from './media';
+import { pages } from './pages';
 import { posts } from './posts';
 import { settings } from './settings';
 import { tags } from './tags';
@@ -63,6 +64,7 @@ adminApp.route('/api/admin/posts', posts);
 adminApp.route('/api/admin/tags', tags);
 adminApp.route('/api/admin/settings', settings);
 adminApp.route('/api/admin/media', media);
+adminApp.route('/api/admin/pages', pages);
 adminApp.route('/api/admin/templates', templates);
 adminApp.route('/api/admin/preview', preview);
 
@@ -78,6 +80,9 @@ adminApp.get('/admin/*', async (c) => {
   const res = await c.env.ASSETS.fetch(c.req.raw);
   return new Response(res.body, res);
 });
+
+// 管理画面は検索エンジンに載せない
+adminApp.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /\n'));
 
 // ファイルらしきパス（favicon.ico など）に index.html を返さない
 adminApp.get('*', async (c, next) => {

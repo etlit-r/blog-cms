@@ -147,6 +147,10 @@ async function previewPath(db: D1Database, name: string | undefined): Promise<st
       ? `/tags/${encodeURIComponent(row.name)}`
       : { error: 'タグの付いた公開中の記事がないため、タグ別の一覧をプレビューできません。タグを付けた記事を 1 件公開すると確認できます' };
   }
+  if (name === 'page') {
+    const row = await db.prepare("SELECT slug FROM pages WHERE status = 'published' ORDER BY sort_order, id LIMIT 1").first<{ slug: string }>();
+    return row ? `/p/${row.slug}` : { error: '公開中の固定ページがないため、固定ページをプレビューできません。固定ページを 1 つ公開すると確認できます' };
+  }
   if (name === 'tags') return '/tags';
   if (name === '404') return '/__preview/not-found';
   return '/';
