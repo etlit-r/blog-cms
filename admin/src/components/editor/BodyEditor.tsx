@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useRef, useState, type ReactNode } from 'react';
+import { useCoarsePointer } from '../../lib/useCoarsePointer';
 import { useKeyboardInset } from '../../lib/useKeyboardInset';
 import { useUploadQueue } from '../../lib/useUploadQueue';
 import { ImagePickButton } from '../ImagePickButton';
@@ -16,19 +17,6 @@ type Props = {
   onChange: (html: string) => void;
   onModeChange: (mode: EditorMode) => void;
 };
-
-/** タッチ操作の端末か（スマホ・タブレット） */
-function useCoarsePointer(): boolean {
-  const query = '(pointer: coarse)';
-  const [coarse, setCoarse] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    const onChange = () => setCoarse(mql.matches);
-    mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
-  }, []);
-  return coarse;
-}
 
 /**
  * 記事本文のエディタ。リッチテキストと HTML を切り替えられる（どちらも保存する形式は HTML）。

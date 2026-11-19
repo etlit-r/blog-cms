@@ -8,6 +8,7 @@ import { media } from './media';
 import { posts } from './posts';
 import { settings } from './settings';
 import { tags } from './tags';
+import { preview, templates } from './templates';
 
 /** ログインなしで呼べる API */
 const PUBLIC_API_PATHS = new Set(['/api/admin/auth/status', '/api/admin/auth/setup', '/api/admin/auth/login', '/api/admin/auth/logout']);
@@ -62,6 +63,8 @@ adminApp.route('/api/admin/posts', posts);
 adminApp.route('/api/admin/tags', tags);
 adminApp.route('/api/admin/settings', settings);
 adminApp.route('/api/admin/media', media);
+adminApp.route('/api/admin/templates', templates);
+adminApp.route('/api/admin/preview', preview);
 
 adminApp.all('/api/*', (c) => apiError(c, 404, 'not_found', 'API が見つかりません'));
 

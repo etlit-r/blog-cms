@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useBlocker, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { CoverPicker } from '../components/CoverPicker';
 import { BodyEditor } from '../components/editor/BodyEditor';
 import type { EditorMode } from '../components/editor/types';
 import { Field } from '../components/Field';
+import { PreviewSheet } from '../components/PreviewSheet';
 import { TagInput } from '../components/TagInput';
 import { ApiError, api } from '../lib/api';
 import { clearDraft, draftKey, loadDraft, saveDraft, type LocalDraft } from '../lib/autosave';
 import { STATE_LABELS, formatDateTime, fromLocalInput, toLocalInput } from '../lib/format';
 import type { Post } from '../lib/types';
 import { useSettings } from '../lib/useSettings';
+import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 
 /** 入力が止まってから端末に自動保存するまでの時間 */
 const AUTOSAVE_DELAY_MS = 3000;
@@ -71,13 +73,12 @@ export function PostEdit() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string; conflict?: boolean } | null>(null);
   const [showSettings, setShowSettings] = useState(isNew);
-  /** 保存・削除の直後の画面移動では、未保存の確認を出さない */
-  const leaving = useRef(false);
   /** 端末に自動保存された、まだサーバーに保存していない内容（復元するか確認する） */
   const [pendingDraft, setPendingDraft] = useState<LocalDraft<Form> | null>(null);
   /** 復元するか確認している間は、自動保存で上書きしない */
   const [draftChecked, setDraftChecked] = useState(false);
   const key = draftKey(id);
+  const [showPreview, setShowPreview] = useState(false);
   /** 新しい記事を作った直後、保存中に打った内容を、移動先の画面に引き継ぐ */
   const carryOver = useRef<Form | null>(null);
 
@@ -114,19 +115,8 @@ export function PostEdit() {
   const saved = useMemo(() => (post ? formOf(post) : EMPTY), [post]);
   const dirty = !sameForm(form, saved);
 
-  // 未保存のまま画面を離れようとしたら確認する（アプリ内の移動とタブを閉じる操作の両方）
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
-  useEffect(() => {
-    if (blocker.state !== 'blocked') return;
-    if (window.confirm('保存していない変更があります。破棄して移動しますか？')) blocker.proceed();
-    else blocker.reset();
-  }, [blocker]);
-  useEffect(() => {
-    if (!dirty) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [dirty]);
+  /** 保存・削除の直後の画面移動では、未保存の確認を出さない（leaving.current = true） */
+  const leaving = useUnsavedGuard(dirty);
 
   // 入力が止まって 3 秒たったら、端末に自動保存する。サーバーと同じ内容に戻ったら消す
   useEffect(() => {
@@ -246,8 +236,16 @@ export function PostEdit() {
           ‹
         </Link>
         <span className={`badge ${post?.state ?? 'draft'}`}>{STATE_LABELS[post?.state ?? 'draft']}</span>
-        {dirty && <span className="hint">未保存</span>}
+        {dirty && (
+          <span className="unsaved-dot" role="status" aria-label="未保存" title="未保存">
+            ●
+          </span>
+        )}
         <span className="spacer" />
+        {/* スマホの幅に収まるよう、プレビューはアイコンだけにする */}
+        <button type="button" className="icon-btn eye" aria-label="プレビュー" title="プレビュー" onClick={() => setShowPreview(true)}>
+          👁
+        </button>
         <button type="button" className="btn small" disabled={saving || (!dirty && !isNew)} onClick={() => void save()}>
           {saving ? '保存中…' : '保存'}
         </button>
@@ -359,6 +357,19 @@ export function PostEdit() {
         </section>
       </main>
 
+      {showPreview && (
+        <PreviewSheet
+          onClose={() => setShowPreview(false)}
+          load={async () =>
+            (
+              await api<{ html: string }>('/preview', {
+                method: 'POST',
+                body: { post: { title: form.title, bodyHtml: form.bodyHtml, tags: form.tags, publishedAt: form.publishedAt, coverImage: form.coverImage } },
+              })
+            ).html
+          }
+        />
+      )}
     </div>
   );
 }

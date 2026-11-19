@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-rou
 import { Layout } from './components/Layout';
 import { AuthProvider, useAuth } from './lib/auth';
 import { Design } from './pages/Design';
+import { TemplateEdit } from './pages/TemplateEdit';
 import { Login } from './pages/Login';
 import { Media } from './pages/Media';
 import { PostEdit } from './pages/PostEdit';
@@ -52,6 +53,7 @@ const router = createBrowserRouter([
       // 記事の編集は画面を広く使うため、下部タブのない専用レイアウトにする
       { path: 'posts/new', element: <PostEdit /> },
       { path: 'posts/:id', element: <PostEdit /> },
+      { path: 'design/:name', element: <TemplateEdit /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

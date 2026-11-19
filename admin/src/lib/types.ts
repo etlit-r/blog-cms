@@ -44,3 +44,21 @@ export type Media = {
   createdAt: number;
   usageCount?: number;
 };
+
+export type TemplateKind = 'page' | 'partial' | 'css';
+
+export type TemplateSummary = {
+  name: string;
+  kind: TemplateKind;
+  label: string;
+  description: string;
+  customized: boolean;
+  updatedAt: number | null;
+};
+
+export type Template = TemplateSummary & {
+  content: string;
+  defaultContent: string;
+};
+
+export type TemplateRevision = { id: number; createdAt: number; length: number };
