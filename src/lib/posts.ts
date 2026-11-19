@@ -10,7 +10,7 @@ export const SLUG_MAX = 80;
 export const BODY_MAX = 500_000; // D1 の 1 行の上限 (2MB) に余裕を持たせる
 export const EXCERPT_MAX = 300;
 
-const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export type PostStatus = 'draft' | 'published';
 /** 管理画面で表示する状態。公開日時が未来なら「予約」 */

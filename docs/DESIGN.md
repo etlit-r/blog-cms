@@ -220,7 +220,9 @@ CREATE TABLE pages (
   title      TEXT NOT NULL,
   body_html  TEXT NOT NULL,
   status     TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published')),
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  editor_mode TEXT NOT NULL DEFAULT 'rich',   -- migrations/0003 で追加（記事と同じくリッチ / HTML）
+  sort_order  INTEGER NOT NULL DEFAULT 0      -- migrations/0003 で追加（ヘッダーに並べる順番）
 );
 
 -- サイト設定（KVS 的に使う）

@@ -6,6 +6,7 @@ import header from './header.html';
 import home from './home.html';
 import layout from './layout.html';
 import pager from './pager.html';
+import page from './page.html';
 import post from './post.html';
 import postCard from './post-card.html';
 import siteCss from './site.css';
@@ -29,6 +30,7 @@ export const DEFAULT_TEMPLATES: Record<string, TemplateInfo> = {
   post: { kind: 'page', label: '記事ページ', description: '記事 1 件の表示', content: post },
   tag: { kind: 'page', label: 'タグ別の一覧', description: 'あるタグの付いた記事の一覧', content: tag },
   tags: { kind: 'page', label: 'タグ一覧', description: 'すべてのタグの一覧', content: tags },
+  page: { kind: 'page', label: '固定ページ', description: 'About などの固定ページ（/p/URL）の表示', content: page },
   '404': { kind: 'page', label: '404 ページ', description: 'ページが見つからないときの表示', content: notFound },
   'partial:header': { kind: 'partial', label: 'ヘッダー', description: '{{> header}} で読み込む部品', content: header },
   'partial:footer': { kind: 'partial', label: 'フッター', description: '{{> footer}} で読み込む部品', content: footer },
@@ -47,6 +49,7 @@ export const TEMPLATE_ORDER = [
   'post',
   'tag',
   'tags',
+  'page',
   '404',
   'partial:header',
   'partial:footer',

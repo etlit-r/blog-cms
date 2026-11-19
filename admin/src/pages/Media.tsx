@@ -56,19 +56,20 @@ export function Media() {
   );
 }
 
-type UsedBy = { id: number; title: string }[];
+/** 画像を使っている記事と固定ページ */
+type UsedBy = { posts: { id: number; title: string }[]; pages: { id: number; title: string }[] };
 
 function MediaDetail({ media, onClose, onUpdated, onDeleted }: { media: MediaItem; onClose: () => void; onUpdated: (m: MediaItem) => void; onDeleted: (id: number) => void }) {
   const { settings } = useSettings();
   const [alt, setAlt] = useState(media.alt);
-  const [posts, setPosts] = useState<UsedBy | null>(null);
+  const [usedBy, setUsedBy] = useState<UsedBy | null>(null);
   const [message, setMessage] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    api<{ posts: UsedBy }>(`/media/${media.id}`)
-      .then((res) => !cancelled && setPosts(res.posts))
-      .catch(() => !cancelled && setPosts([]));
+    api<UsedBy>(`/media/${media.id}`)
+      .then((res) => !cancelled && setUsedBy({ posts: res.posts, pages: res.pages }))
+      .catch(() => !cancelled && setUsedBy({ posts: [], pages: [] }));
     return () => {
       cancelled = true;
     };
@@ -95,8 +96,8 @@ function MediaDetail({ media, onClose, onUpdated, onDeleted }: { media: MediaIte
   }
 
   async function remove() {
-    const used = posts?.length ?? 0;
-    const question = used > 0 ? `この画像は ${used} 件の記事で使われています。削除すると記事から画像が表示されなくなります。削除しますか？` : 'この画像を削除しますか？元に戻せません。';
+    const used = (usedBy?.posts.length ?? 0) + (usedBy?.pages.length ?? 0);
+    const question = used > 0 ? `この画像は ${used} 件の記事・固定ページで使われています。削除すると、そのページから画像が表示されなくなります。削除しますか？` : 'この画像を削除しますか？元に戻せません。';
     if (!window.confirm(question)) return;
     try {
       await api(`/media/${media.id}${used > 0 ? '?force=1' : ''}`, { method: 'DELETE' });
@@ -105,8 +106,8 @@ function MediaDetail({ media, onClose, onUpdated, onDeleted }: { media: MediaIte
       // 確認している間に記事で使われ始めた場合
       if (e instanceof ApiError && e.code === 'in_use') setMessage({ type: 'error', text: `${e.message}。もう一度削除を押すと削除します` });
       else setMessage({ type: 'error', text: e instanceof Error ? e.message : String(e) });
-      const res = await api<{ posts: UsedBy }>(`/media/${media.id}`).catch(() => null);
-      if (res) setPosts(res.posts);
+      const res = await api<UsedBy>(`/media/${media.id}`).catch(() => null);
+      if (res) setUsedBy({ posts: res.posts, pages: res.pages });
     }
   }
 
@@ -136,16 +137,21 @@ function MediaDetail({ media, onClose, onUpdated, onDeleted }: { media: MediaIte
         )}
 
         <div className="field">
-          <span className="label">使っている記事</span>
-          {posts === null ? (
+          <span className="label">使っている記事・固定ページ</span>
+          {usedBy === null ? (
             <p className="hint">確認中…</p>
-          ) : posts.length === 0 ? (
-            <p className="hint">どの記事でも使われていません</p>
+          ) : usedBy.posts.length + usedBy.pages.length === 0 ? (
+            <p className="hint">どの記事・固定ページでも使われていません</p>
           ) : (
             <ul className="link-list">
-              {posts.map((p) => (
-                <li key={p.id}>
+              {usedBy.posts.map((p) => (
+                <li key={`post-${p.id}`}>
                   <Link to={`/posts/${p.id}`}>{p.title || '（無題）'}</Link>
+                </li>
+              ))}
+              {usedBy.pages.map((p) => (
+                <li key={`page-${p.id}`}>
+                  <Link to={`/pages/${p.id}`}>固定ページ: {p.title}</Link>
                 </li>
               ))}
             </ul>

@@ -1,10 +1,12 @@
-import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router';
+import { createBrowserRouter, Navigate, Outlet, RouterProvider, ScrollRestoration } from 'react-router';
 import { Layout } from './components/Layout';
 import { AuthProvider, useAuth } from './lib/auth';
 import { Design } from './pages/Design';
 import { TemplateEdit } from './pages/TemplateEdit';
 import { Login } from './pages/Login';
 import { Media } from './pages/Media';
+import { PageEdit } from './pages/PageEdit';
+import { Pages } from './pages/Pages';
 import { PostEdit } from './pages/PostEdit';
 import { Posts } from './pages/Posts';
 import { Settings } from './pages/Settings';
@@ -34,29 +36,47 @@ function FullScreenMessage({ message, onRetry }: { message: string; onRetry?: ()
   );
 }
 
+/** すべての画面の外枠。画面を移動したら、前の画面のスクロール位置を引き継がず先頭から表示する */
+function Root() {
+  return (
+    <>
+      <Outlet />
+      <ScrollRestoration />
+    </>
+  );
+}
+
 const router = createBrowserRouter([
-  { path: '/setup', element: <Setup /> },
-  { path: '/login', element: <Login /> },
   {
-    element: <RequireAuth />,
+    element: <Root />,
     children: [
+      { path: '/setup', element: <Setup /> },
+      { path: '/login', element: <Login /> },
       {
-        element: <Layout />,
+        element: <RequireAuth />,
         children: [
-          { index: true, element: <Posts /> },
-          { path: 'tags', element: <Tags /> },
-          { path: 'media', element: <Media /> },
-          { path: 'design', element: <Design /> },
-          { path: 'settings', element: <Settings /> },
+          {
+            element: <Layout />,
+            children: [
+              { index: true, element: <Posts /> },
+              { path: 'tags', element: <Tags /> },
+              { path: 'pages', element: <Pages /> },
+              { path: 'media', element: <Media /> },
+              { path: 'design', element: <Design /> },
+              { path: 'settings', element: <Settings /> },
+            ],
+          },
+          // 記事などの編集は画面を広く使うため、下部タブのない専用レイアウトにする
+          { path: 'posts/new', element: <PostEdit /> },
+          { path: 'posts/:id', element: <PostEdit /> },
+          { path: 'design/:name', element: <TemplateEdit /> },
+          { path: 'pages/new', element: <PageEdit /> },
+          { path: 'pages/:id', element: <PageEdit /> },
         ],
       },
-      // 記事の編集は画面を広く使うため、下部タブのない専用レイアウトにする
-      { path: 'posts/new', element: <PostEdit /> },
-      { path: 'posts/:id', element: <PostEdit /> },
-      { path: 'design/:name', element: <TemplateEdit /> },
+      { path: '*', element: <Navigate to="/" replace /> },
     ],
   },
-  { path: '*', element: <Navigate to="/" replace /> },
 ]);
 
 export function App() {

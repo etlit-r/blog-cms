@@ -1,6 +1,7 @@
 <header class="site-header">
   <a href="/" class="site-title">{{site.title}}</a>
   <nav class="site-nav">
+    {{#nav.pages}}<a href="{{url}}">{{title}}</a>{{/nav.pages}}
     <a href="/tags">タグ</a>
   </nav>
 </header>

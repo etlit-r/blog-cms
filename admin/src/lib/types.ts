@@ -62,3 +62,14 @@ export type Template = TemplateSummary & {
 };
 
 export type TemplateRevision = { id: number; createdAt: number; length: number };
+
+export type FixedPage = {
+  id: number;
+  slug: string;
+  title: string;
+  bodyHtml: string;
+  editorMode: 'rich' | 'html';
+  status: 'draft' | 'published';
+  sortOrder: number;
+  updatedAt: number;
+};

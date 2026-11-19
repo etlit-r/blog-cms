@@ -85,6 +85,13 @@ img {
   text-decoration: none;
 }
 
+.site-nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 14px;
+}
+
 .site-nav a {
   display: inline-block;
   padding: 6px 4px;

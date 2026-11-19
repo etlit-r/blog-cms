@@ -11,7 +11,9 @@ const TABS = [
 export function Layout() {
   const { pathname } = useLocation();
   const current = TABS.find((t) => (t.end ? pathname === t.to : pathname.startsWith(t.to)));
-  const title = pathname === '/tags' ? 'タグ管理' : (current?.label ?? '管理画面');
+  // タグ管理・固定ページは「記事」タブの中の画面として扱う
+  const subPages: Record<string, string> = { '/tags': 'タグ管理', '/pages': '固定ページ' };
+  const title = subPages[pathname] ?? current?.label ?? '管理画面';
 
   return (
     <div className="app">
@@ -23,7 +25,7 @@ export function Layout() {
       </main>
       <nav className="bottom-nav" aria-label="メインメニュー">
         {TABS.map((tab) => (
-          <NavLink key={tab.to} to={tab.to} end={tab.end} className={tab.to === '/' && pathname === '/tags' ? 'active' : undefined}>
+          <NavLink key={tab.to} to={tab.to} end={tab.end} className={tab.to === '/' && pathname in subPages ? 'active' : undefined}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d={tab.icon} />
             </svg>

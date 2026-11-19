@@ -14,6 +14,7 @@ const COMMON: VarGroup = {
     { name: '{{page.ogImage}}', description: 'SNS 用の画像の URL（ないときは空）' },
     { name: '{{cssUrl}}', description: 'サイトの CSS の URL' },
     { name: '{{year}}', description: '今年（例: 2026）' },
+    { name: '{{#nav.pages}} 〜 {{/nav.pages}}', description: '公開中の固定ページごとに繰り返す。中では {{title}} {{url}}' },
   ],
 };
 
@@ -90,6 +91,17 @@ export const TEMPLATE_VARS: Record<string, VarGroup[]> = {
       vars: [
         { name: '{{#newer}} 〜 {{/newer}}', description: '新しい記事があれば中身を表示。中では {{url}} {{title}}' },
         { name: '{{#older}} 〜 {{/older}}', description: '古い記事があれば中身を表示。中では {{url}} {{title}}' },
+      ],
+    },
+    COMMON,
+    SYNTAX,
+  ],
+  page: [
+    {
+      title: '固定ページ（{{#fixedPage}} 〜 {{/fixedPage}} の中）',
+      vars: [
+        { name: '{{title}}', description: 'タイトル' },
+        { name: '{{{bodyHtml}}}', description: '本文（HTML のまま表示する）' },
       ],
     },
     COMMON,

@@ -35,7 +35,7 @@ async function publishPost(body: Record<string, unknown> = {}) {
 describe('テンプレートの一覧と取得', () => {
   it('すべてのテンプレートを初期のまま返す', async () => {
     const { items } = (await (await api('/templates', { cookie })).json()) as { items: ApiTemplate[] };
-    expect(items.map((t) => t.name)).toEqual(['layout', 'home', 'post', 'tag', 'tags', '404', 'partial:header', 'partial:footer', 'partial:post-card', 'partial:pager', 'css:site']);
+    expect(items.map((t) => t.name)).toEqual(['layout', 'home', 'post', 'tag', 'tags', 'page', '404', 'partial:header', 'partial:footer', 'partial:post-card', 'partial:pager', 'css:site']);
     expect(items.every((t) => !t.customized)).toBe(true);
     const footer = await get('partial:footer');
     expect(footer.content).toBe(footer.defaultContent);
