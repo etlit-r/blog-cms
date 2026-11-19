@@ -90,6 +90,8 @@ describe('RSS・サイトマップ・robots.txt', () => {
     expect(xml).toContain('<loc>https://etlits.dev/posts/hello</loc>');
     expect(xml).toContain(`<loc>https://etlits.dev/tags/${encodeURIComponent('旅行')}</loc>`);
     expect(xml).toContain('<loc>https://etlits.dev/p/about</loc>');
+    // トップにも更新日（最新の記事の更新日時）が付く
+    expect(xml).toMatch(/<url><loc>https:\/\/etlits\.dev\/<\/loc><lastmod>\d{4}-\d{2}-\d{2}T[\d:.]+Z<\/lastmod><\/url>/);
   });
 
   it('robots.txt は公開サイトでは許可、管理画面では拒否', async () => {

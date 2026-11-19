@@ -444,10 +444,12 @@ publicApp.get('/sitemap.xml', async (c) => {
       .bind(t),
     db.prepare("SELECT '/p/' || slug AS path, updated_at AS lastmod FROM pages WHERE status = 'published' ORDER BY sort_order, id"),
   ]);
+  // トップとタグ一覧は、いちばん最近更新された公開記事の日時を更新日にする（Google はクロールの目安に使う）
+  const latest = posts!.results.reduce<number | null>((max, p) => (p.lastmod !== null && (max === null || p.lastmod > max) ? p.lastmod : max), null);
   const entries = [
-    { path: '/', lastmod: null },
+    { path: '/', lastmod: latest },
     ...posts!.results,
-    { path: '/tags', lastmod: null },
+    { path: '/tags', lastmod: latest },
     // タグ名は URL に使えない文字を含むので、ここでエンコードする
     ...tags!.results.map((r) => ({ path: tagUrl(r.path), lastmod: r.lastmod })),
     ...pages!.results,
