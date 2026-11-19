@@ -1,6 +1,7 @@
 import { SELF } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_TEMPLATES, TEMPLATE_ORDER } from '../src/defaults';
 import { PUBLIC, api, ownerSession, resetDb } from './helpers';
 
 let cookie: string;
@@ -38,6 +39,10 @@ describe('テンプレートの一覧と取得', () => {
     expect(items.every((t) => !t.customized)).toBe(true);
     const footer = await get('partial:footer');
     expect(footer.content).toBe(footer.defaultContent);
+  });
+
+  it('並び順のリストに、すべてのテンプレートが 1 回ずつ入っている', () => {
+    expect([...TEMPLATE_ORDER].sort()).toEqual(Object.keys(DEFAULT_TEMPLATES).sort());
   });
 
   it('知らない名前は 404', async () => {
@@ -146,6 +151,14 @@ describe('プレビュー', () => {
     const { html, path } = (await res.json()) as PreviewRes;
     expect(path).toBe(`/posts/${post.slug}`);
     expect(html).toContain('<h1>記事: 最新の記事</h1>');
+  });
+
+  it('公開中の記事がなければ、記事ページ・タグ別一覧のプレビューは理由を返す', async () => {
+    const post = await api('/preview', { method: 'POST', cookie, body: { name: 'post' } });
+    expect(post.status).toBe(409);
+    expect(await post.json()).toMatchObject({ error: { code: 'no_preview_data' } });
+    const tag = await api('/preview', { method: 'POST', cookie, body: { name: 'tag' } });
+    expect(tag.status).toBe(409);
   });
 
   it('404 ページもプレビューできる', async () => {

@@ -37,7 +37,10 @@ export const DEFAULT_TEMPLATES: Record<string, TemplateInfo> = {
   'css:site': { kind: 'css', label: 'サイトの CSS', description: '全ページで読み込むスタイルシート', content: siteCss },
 };
 
-/** 管理画面での並び順（オブジェクトのキーの順番は '404' が先頭になってしまうため、別に持つ） */
+/**
+ * 管理画面での並び順（オブジェクトのキーの順番は '404' が先頭になってしまうため、別に持つ）。
+ * DEFAULT_TEMPLATES にテンプレートを足したら、ここにも足すこと（test/templates.test.ts で一致を確かめている）。
+ */
 export const TEMPLATE_ORDER = [
   'layout',
   'home',
@@ -50,4 +53,4 @@ export const TEMPLATE_ORDER = [
   'partial:post-card',
   'partial:pager',
   'css:site',
-] as const satisfies readonly (keyof typeof DEFAULT_TEMPLATES)[];
+] as const;

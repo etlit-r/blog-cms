@@ -121,15 +121,19 @@ templates.post('/:name/restore', async (c) => {
 
 export const preview = new Hono<AppEnv>();
 
-/** テンプレートごとに、プレビューで開く公開ページ */
-async function previewPath(db: D1Database, name: string | undefined): Promise<string> {
+/**
+ * テンプレートごとに、プレビューで開く公開ページ。
+ * 表示に使える記事がなく、別のページを出すしかないときは、その理由（{ error }）を返す
+ * （黙って別のページを出すと、編集が反映されていないように見えるため）。
+ */
+async function previewPath(db: D1Database, name: string | undefined): Promise<string | { error: string }> {
   const t = now();
   if (name === 'post') {
     const row = await db
       .prepare("SELECT slug FROM posts WHERE status = 'published' AND published_at <= ? ORDER BY published_at DESC LIMIT 1")
       .bind(t)
       .first<{ slug: string }>();
-    return row ? `/posts/${row.slug}` : '/';
+    return row ? `/posts/${row.slug}` : { error: '公開中の記事がないため、記事ページをプレビューできません。記事を 1 件公開すると確認できます' };
   }
   if (name === 'tag') {
     const row = await db
@@ -139,7 +143,9 @@ async function previewPath(db: D1Database, name: string | undefined): Promise<st
       )
       .bind(t)
       .first<{ name: string }>();
-    return row ? `/tags/${encodeURIComponent(row.name)}` : '/tags';
+    return row
+      ? `/tags/${encodeURIComponent(row.name)}`
+      : { error: 'タグの付いた公開中の記事がないため、タグ別の一覧をプレビューできません。タグを付けた記事を 1 件公開すると確認できます' };
   }
   if (name === 'tags') return '/tags';
   if (name === '404') return '/__preview/not-found';
@@ -185,6 +191,7 @@ preview.post('/', async (c) => {
   }
 
   const path = post ? `/posts/${PREVIEW_POST_SLUG}` : await previewPath(c.env.DB, typeof body.name === 'string' ? body.name : undefined);
+  if (typeof path !== 'string') return apiError(c, 409, 'no_preview_data', path.error);
   const protocol = new URL(c.req.url).protocol;
   const res = await publicApp.fetch(
     new Request(`${protocol}//${c.env.PUBLIC_HOST}${path}`),
