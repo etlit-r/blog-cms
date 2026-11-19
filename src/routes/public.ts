@@ -435,10 +435,11 @@ publicApp.get('/sitemap.xml', async (c) => {
   const origin = absoluteUrl(c, '');
   const t = now();
   const [posts, tags, pages] = await db.batch<{ path: string; lastmod: number | null }>([
-    db.prepare(`SELECT '/posts/' || p.slug AS path, p.updated_at AS lastmod FROM posts p WHERE ${PUBLISHED} ORDER BY p.published_at DESC`).bind(t),
+    // 予約投稿は公開時刻にページが現れるので、更新日時と公開日時の新しいほうを更新日にする
+    db.prepare(`SELECT '/posts/' || p.slug AS path, MAX(p.updated_at, p.published_at) AS lastmod FROM posts p WHERE ${PUBLISHED} ORDER BY p.published_at DESC`).bind(t),
     db
       .prepare(
-        `SELECT t.name AS path, MAX(p.updated_at) AS lastmod FROM tags t JOIN post_tags pt ON pt.tag_id = t.id
+        `SELECT t.name AS path, MAX(MAX(p.updated_at, p.published_at)) AS lastmod FROM tags t JOIN post_tags pt ON pt.tag_id = t.id
          JOIN posts p ON p.id = pt.post_id AND ${PUBLISHED} GROUP BY t.id ORDER BY t.name`,
       )
       .bind(t),

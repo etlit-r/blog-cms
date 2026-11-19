@@ -90,6 +90,13 @@ describe('RSS・サイトマップ・robots.txt', () => {
     expect(xml).toContain('<loc>https://etlits.dev/posts/hello</loc>');
     expect(xml).toContain(`<loc>https://etlits.dev/tags/${encodeURIComponent('旅行')}</loc>`);
     expect(xml).toContain('<loc>https://etlits.dev/p/about</loc>');
+    // 予約投稿は、公開時刻を過ぎたら公開時刻が更新日になる
+    const scheduledAt = nowSec() - 5;
+    const post = await publishPost({ slug: 'scheduled', publishedAt: nowSec() + 3600 });
+    await env.DB.prepare('UPDATE posts SET published_at = ?, updated_at = ? WHERE slug = ?').bind(scheduledAt, scheduledAt - 1000, post.slug).run();
+    await env.DB.prepare("UPDATE settings SET value = CAST(value AS INTEGER) + 1 WHERE key = 'content_version'").run();
+    const xml2 = await (await get('/sitemap.xml')).text();
+    expect(xml2).toContain(`<loc>https://etlits.dev/posts/scheduled</loc><lastmod>${new Date(scheduledAt * 1000).toISOString()}</lastmod>`);
     // トップにも更新日（最新の記事の更新日時）が付く
     expect(xml).toMatch(/<url><loc>https:\/\/etlits\.dev\/<\/loc><lastmod>\d{4}-\d{2}-\d{2}T[\d:.]+Z<\/lastmod><\/url>/);
   });
