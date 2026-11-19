@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- 逆さまの静けさ: 凪いだ水面に、三日月が逆さまに映っている -->
+  <defs>
+    <mask id="crescent">
+      <rect width="64" height="64" fill="#fff"/>
+      <circle cx="37.5" cy="15.5" r="9.5" fill="#000"/>
+    </mask>
+    <g id="moon">
+      <circle cx="31" cy="20" r="11" fill="#f3e7c4" mask="url(#crescent)"/>
+    </g>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#1d2540"/>
+  <use href="#moon"/>
+  <!-- 水面（y = 35）を軸に上下を反転した、淡い映り込み -->
+  <g transform="translate(0 70) scale(1 -1)" opacity="0.38">
+    <use href="#moon"/>
+  </g>
+  <rect x="11" y="34" width="42" height="2" rx="1" fill="#f3e7c4" opacity="0.6"/>
+</svg>
