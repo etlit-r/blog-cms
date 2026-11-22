@@ -1,7 +1,14 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../../env';
 import { apiError, readJson } from '../../lib/http';
-import { POSTS_PER_PAGE_MAX, bumpContentVersionStatement, getSettings, setSettingStatement } from '../../lib/settings';
+import {
+  POSTS_PER_PAGE_MAX,
+  SITEMAP_EXTRA_URLS_MAX,
+  bumpContentVersionStatement,
+  getSettings,
+  isSitemapUrl,
+  setSettingStatement,
+} from '../../lib/settings';
 
 export const settings = new Hono<AppEnv>();
 
@@ -21,7 +28,7 @@ settings.put('/', async (c) => {
   const db = c.env.DB;
   const body = await readJson(c);
   if (!body) return apiError(c, 400, 'invalid_body', 'リクエストの形式が正しくありません');
-  const { siteTitle, siteDescription, postsPerPage } = body;
+  const { siteTitle, siteDescription, postsPerPage, sitemapExtraUrls } = body;
 
   if (typeof siteTitle !== 'string' || !siteTitle.trim()) return apiError(c, 400, 'invalid_input', 'サイト名を入力してください');
   if ([...siteTitle.trim()].length > TITLE_MAX) return apiError(c, 400, 'invalid_input', `サイト名は${TITLE_MAX}文字以内にしてください`);
@@ -33,7 +40,22 @@ settings.put('/', async (c) => {
     return apiError(c, 400, 'invalid_input', `1ページの表示件数は1〜${POSTS_PER_PAGE_MAX}にしてください`);
   }
 
+  // 省略されたら今の値のまま（古い管理画面からの保存でも消えないように）
+  let extraUrls: string[] | null = null;
+  if (sitemapExtraUrls !== undefined) {
+    if (!Array.isArray(sitemapExtraUrls) || sitemapExtraUrls.some((u) => typeof u !== 'string')) {
+      return apiError(c, 400, 'invalid_input', 'サイトマップに追加する URL の形式が正しくありません');
+    }
+    extraUrls = (sitemapExtraUrls as string[]).map((u) => u.trim()).filter(Boolean);
+    const invalid = extraUrls.find((u) => !isSitemapUrl(u));
+    if (invalid) return apiError(c, 400, 'invalid_input', `サイトマップに追加する URL が正しくありません: ${invalid}`);
+    if (extraUrls.length > SITEMAP_EXTRA_URLS_MAX) {
+      return apiError(c, 400, 'invalid_input', `サイトマップに追加する URL は${SITEMAP_EXTRA_URLS_MAX}件までです`);
+    }
+  }
+
   await db.batch([
+    ...(extraUrls ? [setSettingStatement(db, 'sitemap_extra_urls', [...new Set(extraUrls)].join('\n'))] : []),
     setSettingStatement(db, 'site_title', siteTitle.trim()),
     setSettingStatement(db, 'site_description', siteDescription.trim()),
     setSettingStatement(db, 'posts_per_page', String(postsPerPage)),

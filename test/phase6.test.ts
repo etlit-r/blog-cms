@@ -101,6 +101,21 @@ describe('RSS・サイトマップ・robots.txt', () => {
     expect(xml).toMatch(/<url><loc>https:\/\/etlits\.dev\/<\/loc><lastmod>\d{4}-\d{2}-\d{2}T[\d:.]+Z<\/lastmod><\/url>/);
   });
 
+  it('設定で追加した URL もサイトマップに入る', async () => {
+    const save = (urls: unknown) =>
+      api('/settings', { method: 'PUT', cookie, body: { siteTitle: 'etlits', siteDescription: '', postsPerPage: 10, sitemapExtraUrls: urls } });
+    expect((await save(['https://discheduler.etlits.dev/en/', ' ', 'https://discheduler.etlits.dev/en/'])).status).toBe(200);
+    const xml = await (await get('/sitemap.xml')).text();
+    expect(xml.match(/discheduler/g)).toHaveLength(1);
+    expect(xml).toContain('<url><loc>https://discheduler.etlits.dev/en/</loc></url>');
+
+    expect((await save(['javascript:alert(1)'])).status).toBe(400);
+    expect((await save(['not a url'])).status).toBe(400);
+    // 省略した場合は今の値のまま
+    await api('/settings', { method: 'PUT', cookie, body: { siteTitle: 'etlits', siteDescription: '', postsPerPage: 10 } });
+    expect(await (await get('/sitemap.xml')).text()).toContain('discheduler.etlits.dev');
+  });
+
   it('robots.txt は公開サイトでは許可、管理画面では拒否', async () => {
     expect(await (await get('/robots.txt')).text()).toContain('Sitemap: https://etlits.dev/sitemap.xml');
     expect(await (await get('/robots.txt', ADMIN)).text()).toContain('Disallow: /');

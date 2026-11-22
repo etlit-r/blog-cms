@@ -2,13 +2,36 @@ export type SiteSettings = {
   siteTitle: string;
   siteDescription: string;
   postsPerPage: number;
+  /** サイトマップに追加で載せる URL（このブログ以外のページ。例: https://discheduler.etlits.dev/en/） */
+  sitemapExtraUrls: string[];
 };
+
+export const SITEMAP_EXTRA_URLS_MAX = 50;
+
+/** 設定に保存した文字列（1 行に 1 つ）を URL の配列にする */
+export function parseUrlLines(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/** サイトマップに載せられる URL か（http / https の絶対 URL） */
+export function isSitemapUrl(value: string): boolean {
+  if (value.length > 500) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
 
 export const POSTS_PER_PAGE_MAX = 50;
 
 export async function getSettings(db: D1Database): Promise<SiteSettings> {
   const { results } = await db
-    .prepare("SELECT key, value FROM settings WHERE key IN ('site_title', 'site_description', 'posts_per_page')")
+    .prepare("SELECT key, value FROM settings WHERE key IN ('site_title', 'site_description', 'posts_per_page', 'sitemap_extra_urls')")
     .all<{ key: string; value: string }>();
   const map = new Map(results.map((r) => [r.key, r.value]));
   const perPage = Number(map.get('posts_per_page'));
@@ -16,6 +39,7 @@ export async function getSettings(db: D1Database): Promise<SiteSettings> {
     siteTitle: map.get('site_title') ?? '',
     siteDescription: map.get('site_description') ?? '',
     postsPerPage: Number.isInteger(perPage) && perPage >= 1 && perPage <= POSTS_PER_PAGE_MAX ? perPage : 10,
+    sitemapExtraUrls: parseUrlLines(map.get('sitemap_extra_urls') ?? '').filter(isSitemapUrl),
   };
 }
 
