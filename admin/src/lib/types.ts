@@ -27,6 +27,7 @@ export type SiteSettings = {
   siteTitle: string;
   siteDescription: string;
   postsPerPage: number;
+  sitemapExtraUrls: string[];
   publicUrl: string;
 };
 

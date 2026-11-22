@@ -455,12 +455,15 @@ publicApp.get('/sitemap.xml', async (c) => {
     ...tags!.results.map((r) => ({ path: tagUrl(r.path), lastmod: r.lastmod })),
     ...pages!.results,
   ];
-  const urls = entries
-    .map(
+  // 設定で追加した、このブログ以外のページ（同じドメインのほかのサイトなど）。更新日は分からないので付けない
+  const { sitemapExtraUrls } = await getSettings(db);
+  const urls = [
+    ...entries.map(
       (e) =>
         `  <url><loc>${escapeXml(origin + e.path)}</loc>${e.lastmod ? `<lastmod>${new Date(e.lastmod * 1000).toISOString()}</lastmod>` : ''}</url>`,
-    )
-    .join('\n');
+    ),
+    ...sitemapExtraUrls.map((url) => `  <url><loc>${escapeXml(url)}</loc></url>`),
+  ].join('\n');
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls}

@@ -71,6 +71,7 @@ function SiteSettingsForm() {
   const [siteTitle, setSiteTitle] = useState('');
   const [siteDescription, setSiteDescription] = useState('');
   const [postsPerPage, setPostsPerPage] = useState('10');
+  const [sitemapExtra, setSitemapExtra] = useState('');
   const [done, setDone] = useState(false);
 
   useEffect(() => {
@@ -78,13 +79,19 @@ function SiteSettingsForm() {
     setSiteTitle(settings.siteTitle);
     setSiteDescription(settings.siteDescription);
     setPostsPerPage(String(settings.postsPerPage));
+    setSitemapExtra(settings.sitemapExtraUrls.join('\n'));
   }, [settings]);
 
   const form = useSubmit(async () => {
     setDone(false);
     const next = await api<SiteSettings>('/settings', {
       method: 'PUT',
-      body: { siteTitle, siteDescription, postsPerPage: Number(postsPerPage) },
+      body: {
+        siteTitle,
+        siteDescription,
+        postsPerPage: Number(postsPerPage),
+        sitemapExtraUrls: sitemapExtra.split('\n').map((u) => u.trim()).filter(Boolean),
+      },
     });
     setSettings(next);
     setDone(true);
@@ -99,6 +106,22 @@ function SiteSettingsForm() {
           <Field label="サイト名" required maxLength={100} value={siteTitle} onChange={(e) => setSiteTitle(e.target.value)} />
           <Field label="説明" hint="検索結果や SNS で表示される紹介文" maxLength={300} value={siteDescription} onChange={(e) => setSiteDescription(e.target.value)} />
           <Field label="1ページの記事数" type="number" inputMode="numeric" min={1} max={50} required value={postsPerPage} onChange={(e) => setPostsPerPage(e.target.value)} />
+          <div className="field">
+            <label htmlFor="sitemap-extra">サイトマップに追加する URL</label>
+            <textarea
+              id="sitemap-extra"
+              rows={3}
+              aria-describedby="sitemap-extra-hint"
+              placeholder="https://discheduler.etlits.dev/en/"
+              autoCapitalize="none"
+              spellCheck={false}
+              value={sitemapExtra}
+              onChange={(e) => setSitemapExtra(e.target.value)}
+            />
+            <p id="sitemap-extra-hint" className="hint">
+              このブログ以外のページ（同じドメインのほかのサイトなど）を、1 行に 1 つ書きます。{settings.publicUrl}/sitemap.xml に載ります。
+            </p>
+          </div>
           <a href={settings.publicUrl} target="_blank" rel="noopener" className="hint">
             {settings.publicUrl} を開く
           </a>
